@@ -64,6 +64,9 @@ struct window_context {
   std::uint64_t dispatch_cancelled;
   std::uint64_t callback_exceptions;
   bool fail_next_dispatch;
+  bool fail_next_run;
+  bool fail_next_close_dispatch;
+  bool fail_next_response;
   bool binding_mutation_in_progress;
   std::unordered_map<std::string, binding_context *> bindings;
   std::unordered_map<std::string, pending_call_context *> pending_calls;
@@ -75,7 +78,9 @@ struct window_context {
         owner_thread_id(GetCurrentThreadId()), dispatch_wakeup_scheduled(false),
         dispatch_roots(0), dispatch_enqueued(0), dispatch_executed(0),
         dispatch_cancelled(0), callback_exceptions(0),
-        fail_next_dispatch(false), binding_mutation_in_progress(false),
+        fail_next_dispatch(false), fail_next_run(false),
+        fail_next_close_dispatch(false), fail_next_response(false),
+        binding_mutation_in_progress(false),
         binding_roots(0), next_binding_token(1) {}
 };
 
@@ -407,9 +412,26 @@ CAMLprim value ocaml_webui_raw_run(value vwindow) {
     CAMLreturn(alloc_invalid_state("run requires the Created state"));
   }
 
+  bool inject_failure = false;
+  webview_error_t injected_schedule_error = WEBVIEW_ERROR_OK;
+  {
+    std::lock_guard<std::mutex> lock(context->dispatch_mutex);
+    inject_failure = context->fail_next_run;
+    context->fail_next_run = false;
+    if (inject_failure) {
+      injected_schedule_error = webview_dispatch(
+          context->handle, terminate_on_ui_thread, context);
+    }
+  }
+
   caml_release_runtime_system();
-  webview_error_t error = webview_run(context->handle);
+  webview_error_t error = injected_schedule_error == WEBVIEW_ERROR_OK
+                              ? webview_run(context->handle)
+                              : injected_schedule_error;
   caml_acquire_runtime_system();
+  if (inject_failure && error == WEBVIEW_ERROR_OK) {
+    error = WEBVIEW_ERROR_UNSPECIFIED;
+  }
   std::deque<dispatch_item *> cancelled;
   std::vector<pending_call_context *> pending_calls;
   {
@@ -456,7 +478,13 @@ CAMLprim value ocaml_webui_raw_request_close(value vwindow) {
     // The scheduling call is asynchronous on supported backends. Keep it
     // serialized with queue acceptance and the transition to Stopped so the
     // native handle cannot be destroyed while scheduling is in flight.
-    error = webview_dispatch(context->handle, terminate_on_ui_thread, context);
+    if (context->fail_next_close_dispatch) {
+      context->fail_next_close_dispatch = false;
+      error = WEBVIEW_ERROR_UNSPECIFIED;
+    } else {
+      error =
+          webview_dispatch(context->handle, terminate_on_ui_thread, context);
+    }
     if (error != WEBVIEW_ERROR_OK) {
       int expected = STATE_CLOSING;
       context->state.compare_exchange_strong(expected, STATE_RUNNING,
@@ -855,6 +883,15 @@ CAMLprim value ocaml_webui_raw_return(value vwindow, value vid, value vstatus,
   if (state != STATE_RUNNING && state != STATE_CLOSING) {
     CAMLreturn(alloc_invalid_state("respond requires Running or Closing"));
   }
+  {
+    std::lock_guard<std::mutex> lock(context->dispatch_mutex);
+    if (context->fail_next_response) {
+      context->fail_next_response = false;
+      CAMLreturn(alloc_error_option(
+          static_cast<int>(WEBVIEW_ERROR_UNSPECIFIED),
+          "injected native response failure"));
+    }
+  }
   CAMLreturn(alloc_native_error(webview_return(
       context->handle, String_val(vid), Int_val(vstatus), String_val(vresult))));
 }
@@ -875,6 +912,36 @@ CAMLprim value ocaml_webui_raw_fail_next_dispatch(value vwindow) {
   {
     std::lock_guard<std::mutex> lock(context->dispatch_mutex);
     context->fail_next_dispatch = true;
+  }
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value ocaml_webui_raw_fail_next_run(value vwindow) {
+  CAMLparam1(vwindow);
+  window_context *context = context_of_value(vwindow);
+  {
+    std::lock_guard<std::mutex> lock(context->dispatch_mutex);
+    context->fail_next_run = true;
+  }
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value ocaml_webui_raw_fail_next_close_dispatch(value vwindow) {
+  CAMLparam1(vwindow);
+  window_context *context = context_of_value(vwindow);
+  {
+    std::lock_guard<std::mutex> lock(context->dispatch_mutex);
+    context->fail_next_close_dispatch = true;
+  }
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value ocaml_webui_raw_fail_next_response(value vwindow) {
+  CAMLparam1(vwindow);
+  window_context *context = context_of_value(vwindow);
+  {
+    std::lock_guard<std::mutex> lock(context->dispatch_mutex);
+    context->fail_next_response = true;
   }
   CAMLreturn(Val_unit);
 }

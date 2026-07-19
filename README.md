@@ -2,8 +2,8 @@
 
 OCaml applications with a typed, traceable WebView boundary.
 
-The repository now contains the first directly owned `Webui_raw` implementation
-through the binding and one-shot call stage. The earlier Phase 1 spikes are
+The repository now contains a directly owned `Webui_raw` implementation through
+the shutdown and concurrency hardening stage. The earlier Phase 1 spikes are
 retained as technical evidence and migration inputs.
 
 ## Design
@@ -43,4 +43,5 @@ opam exec -- dune exec test/raw/binding_probe.exe
 opam exec -- dune exec test/raw/window_close_stress.exe -- --iterations 100
 opam exec -- dune exec test/raw/multi_window_stress.exe -- --cycles 10 --dispatches 40
 opam exec -- dune exec test/raw/pending_call_stress.exe -- --cycles 10 --calls 48
+opam exec -- dune exec test/raw/abnormal_cleanup_probe.exe
 ```

@@ -135,6 +135,19 @@ module For_testing : sig
   (** Forces the next native dispatch scheduling attempt to fail. Tests use
       this to verify queue/root rollback; application code must not call it. *)
   val fail_next_dispatch : Window.t -> unit
+
+  (** Schedules an immediate native loop exit and makes the next [Window.run]
+      return an injected native error after normal cleanup. *)
+  val fail_next_run : Window.t -> unit
+
+  (** Makes the next close scheduling attempt fail before native dispatch. *)
+  val fail_next_close_dispatch : Window.t -> unit
+
+  (** Makes the next owner-thread native response fail. *)
+  val fail_next_response : Window.t -> unit
+
+  (** Exposes the one-shot state for failure-path assertions. *)
+  val call_state : Call.t -> call
 end
 
 val version : unit -> string

@@ -4,7 +4,7 @@
 
 ## 現在地
 
-7段階計画の Step 1〜5 を実装した。`Webui_raw` は `owebview` のOCaml
+7段階計画の Step 1〜6 を実装した。`Webui_raw` は `owebview` のOCaml
 bindingを経由せず、固定した upstream `webview` を直接呼び出す。
 
 | Step | 状況 | 主な成果 |
@@ -14,7 +14,7 @@ bindingを経由せず、固定した upstream `webview` を直接呼び出す�
 | 3. Window lifecycle | 完了 | create/config/run/close/destroy、owner-thread検査 |
 | 4. Dispatch queue | 完了 | Window単位queue、single wakeup、root/cancel/例外diagnostics |
 | 5. Binding/Call token | 完了 | registry、request copy、one-shot response、close cancel |
-| 6. Shutdown stress | 進行中 | close、multi-Window/Domain/GC、pending Call競合完了 |
+| 6. Shutdown stress | 完了 | close、multi-Window/Domain/GC、pending Call、異常系cleanup |
 | 7. Spike移行/API freeze | 未着手 | 最終gate |
 
 ## 実装済みAPI
@@ -62,6 +62,12 @@ Windows + OCaml 5.4.1 + MinGW-w64 + WebView2で次を確認した。
     `Window_closing`
   - 全480件の二重完了を `Already_completed` で拒否
   - run終了時・destroy後ともpending Call/dispatch root/queueは0
+- abnormal cleanup probeを10 process連続実行: 全30異常ケース成功
+  - injected run failureはtyped `Run/Unspecified`を返して`Stopped`へ遷移
+  - injected native response failureはCallを`Failed`にし、pending rootを解放
+  - injected close dispatch failureはtyped `Request_close/Unspecified`を返し、
+    `Running`へrollbackしてpending Callをcancel
+  - close失敗後の再close、destroy、全root/queue 0を確認
 
 ## 実装中に判明した点
 
@@ -101,9 +107,21 @@ active callback中、およびそのbindingにpending Callがある間のremove�
 で拒否する。Callをresponse/cancelした後に `Window.dispatch` したremoveは成功する。この
 順序と、誤った順序の拒否をbinding probeで検証した。
 
+### 異常終了の収束規則
+
+Step 6ではnative異常を決定的に再現するone-shot fault injectionを`For_testing`へ追加した。
+
+- `webview_run`がエラーを返しても、queueとpending Callをcancelして`Stopped`へ収束する。
+- `webview_return`失敗時はCallを`Failed`へ移し、native pending registryから除去する。
+- close scheduling失敗時はWindowを`Running`へ戻す。ただしclose開始時点で所有権を
+  回収したpending Callとdispatchはcancel済みとし、late responseを許可しない。
+- close scheduling faultはone-shotであり、その後の`request_close`で終了を再試行できる。
+
 ## 次の実装
 
-Step 6では残るabnormal shutdown異常系を強化し、その後Step 7へ進む。
+Step 6の合格条件を満たしたため、Step 7「移行とraw契約のfreeze」へ進む。
 
-1. abnormal run/native callback failureのcleanupを追加する。
-2. Phase 1 spikeをowned APIへ移行してStep 7 gateへ進む。
+1. 3つのPhase 1 spikeをpatch scriptなしで`Webui_raw`へ移行する。
+2. `owebview`をbuild dependencyから削除する。
+3. 公開`.mli`、lifecycle図、supported-thread表をreviewする。
+4. clean root buildと全実機probe後にraw API契約をfreezeする。

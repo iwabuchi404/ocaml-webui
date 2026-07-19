@@ -185,6 +185,7 @@ module Call = struct
         Error (Error.make Error.Bind (code_of_native code) message)
 
   let request_json call = call.request_json
+  let state call = Atomic.get call.state
 
   let respond call status result_json =
     if not (Atomic.compare_and_set call.state Pending Dispatch_queued) then
@@ -302,6 +303,10 @@ module For_testing = struct
   include Webui_raw_state
 
   let fail_next_dispatch = Webui_raw_native.fail_next_dispatch
+  let fail_next_run = Webui_raw_native.fail_next_run
+  let fail_next_close_dispatch = Webui_raw_native.fail_next_close_dispatch
+  let fail_next_response = Webui_raw_native.fail_next_response
+  let call_state = Call.state
 end
 
 let version = Webui_raw_native.version

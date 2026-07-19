@@ -55,6 +55,14 @@ external record_callback_exception : window -> unit
 external fail_next_dispatch : window -> unit
   = "ocaml_webui_raw_fail_next_dispatch"
 
+external fail_next_run : window -> unit = "ocaml_webui_raw_fail_next_run"
+
+external fail_next_close_dispatch : window -> unit
+  = "ocaml_webui_raw_fail_next_close_dispatch"
+
+external fail_next_response : window -> unit
+  = "ocaml_webui_raw_fail_next_response"
+
 type diagnostics =
   int * int * int * int * int * int * int * int * int
 
