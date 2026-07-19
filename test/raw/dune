@@ -1,0 +1,19 @@
+(test
+ (name state_machine_test)
+ (libraries ocaml-webui.raw))
+
+(executable
+ (name lifecycle_probe)
+ (libraries unix threads ocaml-webui.raw))
+
+(executable
+ (name dispatch_probe)
+ (libraries unix threads ocaml-webui.raw))
+
+(executable
+ (name binding_probe)
+ (libraries unix threads ocaml-webui.raw))
+
+(executable
+ (name window_close_stress)
+ (libraries unix threads ocaml-webui.raw))

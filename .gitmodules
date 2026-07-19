@@ -1,0 +1,6 @@
+[submodule "vendor/owebview"]
+	path = vendor/owebview
+	url = https://github.com/korkorran/owebview.git
+[submodule "vendor/webview"]
+	path = vendor/webview
+	url = https://github.com/webview/webview.git

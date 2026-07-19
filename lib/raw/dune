@@ -1,0 +1,26 @@
+(library
+ (name webui_raw)
+ (public_name ocaml-webui.raw)
+ (wrapped false)
+ (modules webui_raw webui_raw_native webui_raw_state)
+ (foreign_stubs
+  (language cxx)
+  (names webui_raw_stubs)
+  (extra_deps
+   (glob_files_rec ../../vendor/webview/core/include/*)
+   (glob_files_rec ../../vendor/webview/compatibility/mingw/include/*)
+   (glob_files_rec ../../vendor/webview2-sdk-1.0.1150.38/include/*))
+  (flags
+   (:standard
+    -std=c++14
+    -I ../../vendor/webview/core/include
+    -I ../../vendor/webview/compatibility/mingw/include
+    -I ../../vendor/webview2-sdk-1.0.1150.38/include)))
+ (c_library_flags
+  -lstdc++
+  -ladvapi32
+  -lole32
+  -lshell32
+  -lshlwapi
+  -luser32
+  -lversion))
