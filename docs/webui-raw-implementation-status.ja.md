@@ -1,6 +1,6 @@
 # Webui_raw 実装状況
 
-更新日: 2026-07-19
+更新日: 2026-07-20
 
 ## 現在地
 
@@ -134,12 +134,15 @@ Step 6ではnative異常を決定的に再現するone-shot fault injectionを`F
 
 ### Step 7のfreeze候補で確定した意味論
 
-- native closeの再現はpublic HWNDを公開せず、`For_testing.Win32.post_wm_close`だけで行う。
+- native closeの再現はnative handleを公開せず、
+  `For_testing.Native_window.request_close`だけで行う。Windowsでは実際の`WM_CLOSE`を
+  postし、LinuxではUI thread上の`gtk_window_close`へ対応させる。
 - response APIはdelivery保証を名乗らず、`Queued`とresponse失敗diagnosticsを分ける。
 - handler例外のfallback rejectは`{"code":"binding_callback_raised"}`に固定する。
 - 明示destroyが基本契約で、`Window.with_window`を推奨経路とする。finalizerは検出だけで
   native destroyを行わない。
-- Windows固有hookは`For_testing.Win32`に隔離し、cross-platform公開契約へ含めない。
+- native close hookとthread identityは不安定な`For_testing`に隔離し、application向け
+  cross-platform公開契約へ含めない。
 
 ### ストレステストの同期修正
 
@@ -152,8 +155,90 @@ multi-Window 10 cycle、pending Call 10 cycle/480 Callが完走した。100 clos
 
 ## 次の実装
 
-1. Linuxでcompile gateを作り、Window lifecycle、dispatch、binding/Callの意味論差を洗う。
-2. Linux実機runtime probeをWindowsと同じ不変条件で通し、必要なplatform abstractionだけを
-   `lib/raw`内部へ追加する。
-3. Windows/Linuxで公開`.mli`が一致した時点でcross-platform raw APIをfreezeする。
+1. 非WSL UbuntuのGUI環境で同じcompile/runtime gateを通す。
+2. Linuxのsingle-live-Window制約を初期サポート契約として受け入れるか確認し、
+   Windows/Linux共通の公開`.mli`をfreezeする。
+3. CIにWindows compile/testとLinux compile/state-machine gateを追加する。
 4. その後にmacOS compile/runtime検証を加え、上位の手書きbridge baselineへ進む。
+
+## 追記: Linux portability着手（2026-07-19）
+
+WSL2 Ubuntu 24.04.2 LTSとWSLg（X11/Wayland）の存在、repositoryを`/mnt/d`から参照
+できること、GTK 3 / WebKitGTK 4.1 development packageがaptで提供されることを確認した。
+
+### Windows上で実装・検証済み
+
+- DuneのC++/link flagを`lib/raw/discover.ml`でhost別に生成
+- Windowsは従来のWebView2/Win32 flags、Linuxは`pkg-config`の
+  `gtk+-3.0 webkit2gtk-4.1`と`dl`を選択
+- owner thread identityを`DWORD`から`std::thread::id`へ変更
+- test-only native closeを`For_testing.Native_window.request_close`へ一般化
+  - Windows: 実`PostMessageW(WM_CLOSE)`
+  - Linux: UI threadへdispatchした`gtk_window_close`
+- thread identityをplatform-neutralな`For_testing.current_thread_id`へ移動
+- 変更後のWindows `dune build @all`、state machine、lifecycle、dispatch、binding、
+  native close、abnormal cleanup probeは成功
+
+### 現在のブロッカー
+
+Ubuntuにはまだopam/C++/GTK/WebKitGTKを導入していない。導入前の確認中にWSL VMが
+単純な`id`にも応答しない状態となり、通常の`wsl --shutdown` / `--terminate Ubuntu`も
+timeoutした。管理者権限なしでは`WslService`を再起動できないため、Linux compile/runtime
+gateはWSLサービス再起動後に再開する。source変更は未コミットのまま保持する。
+
+## 追記: WSL2/WSLg Linux gate完了（2026-07-20）
+
+PC再起動後にWSL2が復旧した。Ubuntu 24.04、OCaml 5.4.1、Dune 3.24.0、
+GTK 3.24.41、WebKitGTK 2.52.3を用い、repositoryをWSL ext4上へ同期して検証した。
+直前の「WSL復旧待ち」ブロッカーは解消済みである。
+
+### 検証結果
+
+- `dune build @all` 成功
+- state machine: Window 20 + Call 20 transition成功
+- lifecycle、dispatch、binding、native close、abnormal cleanup、resource safety成功
+- pending Call stress: 10 cycle / 480 Call成功
+  - `sent=95`, `already=385`, duplicate完了480件をすべて拒否
+- window close stress: 20 iteration成功
+  - `enqueued=240`, `executed=163`, `cancelled=77`, close後reject 560
+- Linux guard: 同時2つ目のWindowとworker Domainからのcreateを
+  `Create/Invalid_state`で拒否し、destroy後の順次再createに成功
+- 3つのPhase 1 spike成功
+  - threading: 約3秒のblocking callbackとUI dispatch遅延を観測
+  - Domain dispatch: success/failureの両responseをUI threadへ戻し、重複完了を抑止
+  - native close: 実`gtk_window_close`後にrun return、pending response cancel、
+    Domain join、destroy後root 0を確認
+
+WSLgは各GUI processでEGL/Zinkのdriver fallback warningを出すが、exit statusと
+検証不変条件には影響しなかった。GTK critical warningとは分けて扱う。
+
+### Linuxで判明した制約と修正
+
+GTK/WebKitGTKをWindowsと同じ「Windowごとに別UI Domain」で同時初期化すると、
+`webview_create`中のWebKitGTK `g_object_new`からabort/segmentation faultとなった。
+このため現段階のLinux契約を次に限定した。
+
+- `Window.create`はprocess initial threadだけで許可する
+- 同時にliveなWindowは1つだけ許可する
+- 違反はnative toolkitへ入る前にtyped `Create/Invalid_state`として返す
+- 明示destroy成功後は次のWindowを順次createできる
+- destroy忘れは従来どおりnative APIをfinalizerから呼ばず、leakとして検出するため、
+  そのprocessでは新しいLinux Windowも作らせない
+
+またupstream GTK backendはconstructorでdefault-size処理をidle callbackへ積む。
+`run`前のCreated状態でdestroyすると、WebKit widget解放後にcallbackが動いてGTK critical
+warningになっていた。create直後、bindingを登録する前にpending GLib main-context eventを
+消化することで、callbackを有効なWindow上で完了させた。resource safetyと順次Window
+guardの再実行でGTK critical warningが消えたことを確認した。
+
+### Windows再回帰
+
+Linux制約とtest capability追加後、Windowsで`dune build @all`、state machine、
+lifecycle、dispatch、binding、native close、abnormal cleanup、resource safety、
+multi-Window 3 cycle / 6 Window / 240 dispatchを再実行し、すべて成功した。
+
+### 残課題
+
+- WSLgではないUbuntu実機またはVMで、同一gateとGUI native closeを再検証する
+- Linux single-live-Windowを初期公開制約としてfreezeするか判断する
+- WSLgのEGL warningをCI失敗条件に含めず、GTK criticalを失敗条件にするログ基準を整備する

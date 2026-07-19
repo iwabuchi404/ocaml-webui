@@ -1,5 +1,7 @@
+#if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#endif
 
 #include <atomic>
 #include <cstdint>
@@ -7,6 +9,7 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -52,11 +55,16 @@ struct pending_call_context {
 };
 
 static std::atomic<std::uint64_t> leaked_windows{0};
+static const std::thread::id process_initial_thread =
+    std::this_thread::get_id();
+#if defined(__linux__)
+static std::atomic<unsigned int> live_linux_windows{0};
+#endif
 
 struct window_context {
   webview_t handle;
   std::atomic<int> state;
-  DWORD owner_thread_id;
+  std::thread::id owner_thread_id;
   std::mutex dispatch_mutex;
   std::deque<dispatch_item *> dispatch_queue;
   bool dispatch_wakeup_scheduled;
@@ -78,7 +86,8 @@ struct window_context {
 
   explicit window_context(webview_t native_handle)
       : handle(native_handle), state(STATE_CREATED),
-        owner_thread_id(GetCurrentThreadId()), dispatch_wakeup_scheduled(false),
+        owner_thread_id(std::this_thread::get_id()),
+        dispatch_wakeup_scheduled(false),
         dispatch_roots(0), dispatch_enqueued(0), dispatch_executed(0),
         dispatch_cancelled(0), callback_exceptions(0), response_failures(0),
         fail_next_dispatch(false), fail_next_run(false),
@@ -190,7 +199,17 @@ static value alloc_bound(std::uint64_t token) {
 }
 
 static bool is_owner_thread(window_context *context) {
-  return GetCurrentThreadId() == context->owner_thread_id;
+  return std::this_thread::get_id() == context->owner_thread_id;
+}
+
+static intnat current_thread_identifier() {
+#if defined(_WIN32)
+  return static_cast<intnat>(GetCurrentThreadId());
+#else
+  const std::size_t identifier =
+      std::hash<std::thread::id>{}(std::this_thread::get_id());
+  return static_cast<intnat>(identifier & 0x3fffffffU);
+#endif
 }
 
 static bool configuration_allowed(int state) {
@@ -371,6 +390,16 @@ static void terminate_on_ui_thread(webview_t window, void *) {
   webview_terminate(window);
 }
 
+#if defined(__linux__)
+static void close_native_window_on_ui_thread(webview_t window, void *) {
+  GtkWindow *native_window =
+      GTK_WINDOW(webview_get_window(window));
+  if (native_window != nullptr) {
+    gtk_window_close(native_window);
+  }
+}
+#endif
+
 } // namespace
 
 extern "C" {
@@ -379,17 +408,59 @@ CAMLprim value ocaml_webui_raw_create(value vdebug) {
   CAMLparam1(vdebug);
   CAMLlocal2(vwindow, vresult);
 
+#if defined(__linux__)
+  // GTK/WebKitGTK is process-global and requires UI access from the process
+  // main thread. The upstream GTK backend also owns process-global main-loop
+  // state, so keep the raw Linux contract to one live Window at a time.
+  if (std::this_thread::get_id() != process_initial_thread) {
+    vresult = caml_alloc(2, 1); // Create_error of int * string
+    Store_field(vresult, 0, Val_int(WEBVIEW_ERROR_INVALID_STATE));
+    Store_field(
+        vresult, 1,
+        caml_copy_string(
+            "Linux Window.create must execute on the process main thread"));
+    CAMLreturn(vresult);
+  }
+  unsigned int expected_live_windows = 0;
+  if (!live_linux_windows.compare_exchange_strong(
+          expected_live_windows, 1, std::memory_order_acq_rel)) {
+    vresult = caml_alloc(2, 1); // Create_error of int * string
+    Store_field(vresult, 0, Val_int(WEBVIEW_ERROR_INVALID_STATE));
+    Store_field(
+        vresult, 1,
+        caml_copy_string("Linux supports only one live Window at a time"));
+    CAMLreturn(vresult);
+  }
+#endif
+
   webview_t handle = webview_create(Bool_val(vdebug), nullptr);
   if (handle == nullptr) {
+#if defined(__linux__)
+    live_linux_windows.store(0, std::memory_order_release);
+#endif
     vresult = caml_alloc(2, 1); // Create_error of int * string
     Store_field(vresult, 0, Val_int(WEBVIEW_ERROR_UNSPECIFIED));
     Store_field(vresult, 1, caml_copy_string("webview_create returned null"));
     CAMLreturn(vresult);
   }
 
+#if defined(__linux__)
+  // webview's GTK constructor schedules its default-size callback with
+  // g_idle_add(). Execute that callback while the new engine is still valid;
+  // otherwise destroying a Created Window would run it after the WebKit widget
+  // has been released. The single-live-Window guard makes this drain local to
+  // the Window being constructed.
+  while (g_main_context_pending(nullptr)) {
+    g_main_context_iteration(nullptr, FALSE);
+  }
+#endif
+
   window_context *context = new (std::nothrow) window_context(handle);
   if (context == nullptr) {
     webview_destroy(handle);
+#if defined(__linux__)
+    live_linux_windows.store(0, std::memory_order_release);
+#endif
     vresult = caml_alloc(2, 1);
     Store_field(vresult, 0, Val_int(WEBVIEW_ERROR_UNSPECIFIED));
     Store_field(vresult, 1,
@@ -560,6 +631,9 @@ CAMLprim value ocaml_webui_raw_destroy(value vwindow) {
       context->handle = nullptr;
       context->state.store(STATE_DESTROYED, std::memory_order_release);
     }
+#if defined(__linux__)
+    live_linux_windows.store(0, std::memory_order_release);
+#endif
   }
   CAMLreturn(alloc_native_error(error));
 }
@@ -977,29 +1051,55 @@ CAMLprim value ocaml_webui_raw_fail_next_response(value vwindow) {
   CAMLreturn(Val_unit);
 }
 
-CAMLprim value ocaml_webui_raw_post_wm_close(value vwindow) {
+CAMLprim value ocaml_webui_raw_post_native_close(value vwindow) {
   CAMLparam1(vwindow);
   window_context *context = context_of_value(vwindow);
-  if (context->state.load(std::memory_order_acquire) != STATE_RUNNING) {
-    CAMLreturn(alloc_invalid_state("WM_CLOSE requires the Running state"));
+  webview_error_t error = WEBVIEW_ERROR_OK;
+  const char *message = "ok";
+  {
+    std::lock_guard<std::mutex> lock(context->dispatch_mutex);
+    if (context->state.load(std::memory_order_acquire) != STATE_RUNNING) {
+      CAMLreturn(
+          alloc_invalid_state("native close requires the Running state"));
+    }
+#if defined(_WIN32)
+    HWND window = static_cast<HWND>(webview_get_window(context->handle));
+    if (window == nullptr) {
+      error = WEBVIEW_ERROR_INVALID_STATE;
+      message = "webview_get_window returned a null HWND";
+    } else if (!PostMessageW(window, WM_CLOSE, 0, 0)) {
+      error = WEBVIEW_ERROR_UNSPECIFIED;
+      message = "PostMessageW(WM_CLOSE) failed";
+    }
+#elif defined(__linux__)
+    error = webview_dispatch(context->handle,
+                             close_native_window_on_ui_thread, context);
+    if (error != WEBVIEW_ERROR_OK) {
+      message = "unable to dispatch gtk_window_close";
+    }
+#else
+    error = WEBVIEW_ERROR_UNSPECIFIED;
+    message = "native close probe is unsupported on this platform";
+#endif
   }
-  HWND window = static_cast<HWND>(webview_get_window(context->handle));
-  if (window == nullptr) {
-    CAMLreturn(alloc_error_option(
-        static_cast<int>(WEBVIEW_ERROR_INVALID_STATE),
-        "webview_get_window returned a null HWND"));
+  if (error == WEBVIEW_ERROR_OK) {
+    CAMLreturn(Val_none);
   }
-  if (!PostMessageW(window, WM_CLOSE, 0, 0)) {
-    CAMLreturn(alloc_error_option(
-        static_cast<int>(WEBVIEW_ERROR_UNSPECIFIED),
-        "PostMessageW(WM_CLOSE) failed"));
-  }
-  CAMLreturn(Val_none);
+  CAMLreturn(alloc_error_option(static_cast<int>(error), message));
 }
 
 CAMLprim value ocaml_webui_raw_current_thread_id(value vunit) {
   CAMLparam1(vunit);
-  CAMLreturn(Val_long(GetCurrentThreadId()));
+  CAMLreturn(Val_long(current_thread_identifier()));
+}
+
+CAMLprim value ocaml_webui_raw_multiple_windows_supported(value vunit) {
+  CAMLparam1(vunit);
+#if defined(_WIN32)
+  CAMLreturn(Val_true);
+#else
+  CAMLreturn(Val_false);
+#endif
 }
 
 CAMLprim value ocaml_webui_raw_leaked_windows(value vunit) {

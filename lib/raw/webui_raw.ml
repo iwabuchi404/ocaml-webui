@@ -338,13 +338,14 @@ module For_testing = struct
   let fail_next_close_dispatch = Webui_raw_native.fail_next_close_dispatch
   let fail_next_response = Webui_raw_native.fail_next_response
   let call_state = Call.state
+  let current_thread_id = Webui_raw_native.current_thread_id
+  let multiple_windows_supported =
+    Webui_raw_native.multiple_windows_supported
 
-  module Win32 = struct
-    let post_wm_close window =
+  module Native_window = struct
+    let request_close window =
       of_native_result Error.Request_close
-        (Webui_raw_native.post_wm_close window)
-
-    let current_thread_id = Webui_raw_native.current_thread_id
+        (Webui_raw_native.post_native_close window)
   end
 end
 

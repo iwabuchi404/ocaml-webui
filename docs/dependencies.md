@@ -1,9 +1,9 @@
 # Dependency provenance
 
-Date: 2026-07-19
+Date: 2026-07-20
 
-This document records the native and build dependencies used by the Windows
-implementation. Project licensing has not yet been selected; dependency
+This document records the native and build dependencies used by the Windows and
+Linux implementations. Project licensing has not yet been selected; dependency
 licenses remain governed by their respective license files.
 
 ## Upstream webview
@@ -60,3 +60,25 @@ to preserve the provenance of the original experiments and API comparison.
 The selected compiler, include paths, and link flags are encoded by the shared
 `lib/raw/dune` build rule. The focused spikes link `ocaml-webui.raw` and retain
 only their measurement logic and historical results.
+
+## Linux portability toolchain
+
+- Initial distribution: Ubuntu 24.04 LTS under WSL2/WSLg
+- C++ compiler: a C++14-capable system compiler
+- Discovery: `pkg-config`
+- UI toolkit: GTK 3 (`gtk+-3.0`)
+- Browser engine: WebKitGTK 4.1 (`webkit2gtk-4.1`)
+- Additional native library: `dl`
+
+On Ubuntu the development packages are `build-essential`, `pkg-config`,
+`libgtk-3-dev`, and `libwebkit2gtk-4.1-dev`. `lib/raw/discover.ml` emits the
+Dune C/C++ and linker flags for the active host. Windows retains the pinned
+WebView2 headers and Win32 libraries; Linux uses the system GTK/WebKitGTK
+packages.
+
+Ubuntu 24.04 under WSL2/WSLg has passed the full build, raw state-machine tests,
+runtime probes, shutdown stress, and the three Phase 1 spikes with OCaml 5.4.1,
+Dune 3.24.0, GTK 3.24.41, and WebKitGTK 2.52.3. WSLg logs EGL/Zink fallback
+warnings on this host but no GTK critical warning after the Created-state
+cleanup fix. Linux support is not declared complete until the same gate passes
+in a non-WSL Ubuntu environment.

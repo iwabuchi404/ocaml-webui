@@ -1,3 +1,12 @@
+(executable
+ (name discover)
+ (modules discover)
+ (libraries unix))
+
+(rule
+ (targets c_flags.sexp c_library_flags.sexp)
+ (action (run %{exe:discover.exe})))
+
 (library
  (name webui_raw)
  (public_name ocaml-webui.raw)
@@ -12,15 +21,6 @@
    (glob_files_rec ../../vendor/webview2-sdk-1.0.1150.38/include/*))
   (flags
    (:standard
-    -std=c++14
-    -I ../../vendor/webview/core/include
-    -I ../../vendor/webview/compatibility/mingw/include
-    -I ../../vendor/webview2-sdk-1.0.1150.38/include)))
+    (:include c_flags.sexp))))
  (c_library_flags
-  -lstdc++
-  -ladvapi32
-  -lole32
-  -lshell32
-  -lshlwapi
-  -luser32
-  -lversion))
+  (:include c_library_flags.sexp)))

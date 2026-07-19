@@ -63,11 +63,14 @@ external fail_next_close_dispatch : window -> unit
 external fail_next_response : window -> unit
   = "ocaml_webui_raw_fail_next_response"
 
-external post_wm_close : window -> native_error
-  = "ocaml_webui_raw_post_wm_close"
+external post_native_close : window -> native_error
+  = "ocaml_webui_raw_post_native_close"
 
 external current_thread_id : unit -> int
   = "ocaml_webui_raw_current_thread_id"
+
+external multiple_windows_supported : unit -> bool
+  = "ocaml_webui_raw_multiple_windows_supported"
 
 external leaked_windows : unit -> int = "ocaml_webui_raw_leaked_windows"
 

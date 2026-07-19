@@ -32,7 +32,7 @@ module Webview = struct
     | `Enqueue_failed error -> fail_error error
 end
 
-let current_thread_id = Webui_raw.For_testing.Win32.current_thread_id
+let current_thread_id = Webui_raw.For_testing.current_thread_id
 
 let started_at = Unix.gettimeofday ()
 

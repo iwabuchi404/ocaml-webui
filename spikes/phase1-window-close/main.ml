@@ -30,11 +30,11 @@ module Webview = struct
     | `Window_closing -> failwith "response rejected while Window is closing"
     | `Enqueue_failed error -> fail_error error
 
-  let post_window_close = Webui_raw.For_testing.Win32.post_wm_close
+  let post_window_close = Webui_raw.For_testing.Native_window.request_close
   let diagnostics = Webui_raw.Diagnostics.snapshot
 end
 
-let current_thread_id = Webui_raw.For_testing.Win32.current_thread_id
+let current_thread_id = Webui_raw.For_testing.current_thread_id
 type lifecycle = Running | Closing | Destroyed
 
 let string_of_lifecycle = function
@@ -90,8 +90,8 @@ let html =
 <main>
   <h1>Pending callback → native window close</h1>
   <p>A three-second Domain task starts, then the native window receives
-    <code>WM_CLOSE</code> after 500 ms. Native logs verify cancellation, join,
-    destruction order, and FFI root counts.</p>
+    a platform-native close request after 500 ms. Native logs verify
+    cancellation, join, destruction order, and FFI root counts.</p>
   <div class="spinner"></div>
   <p id="status">Starting automatically…</p>
   <button id="run" type="button">Run close lifecycle probe</button>

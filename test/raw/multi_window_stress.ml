@@ -178,6 +178,38 @@ let run cycles dispatch_count =
     "multi_window_stress: passed cycles=%d windows=%d dispatches=%d\n%!"
     cycles (cycles * 2) (cycles * 2 * dispatch_count)
 
+let expect_create_invalid_state label
+    (result : (Webui_raw.Window.t, Webui_raw.Error.t) result) =
+  match result with
+  | Error
+      {
+        operation = Webui_raw.Error.Create;
+        code = Webui_raw.Error.Invalid_state;
+        _;
+      } ->
+      ()
+  | Error error -> fail_error error
+  | Ok unexpected_window ->
+      ignore (Webui_raw.Window.destroy unexpected_window);
+      failwith (label ^ ": unexpectedly created a Window")
+
+let run_single_window_guard () =
+  let window = require (Webui_raw.Window.create { debug = false }) in
+  Webui_raw.Window.create { debug = false }
+  |> expect_create_invalid_state "second live Window";
+  let worker_result =
+    Domain.spawn (fun () -> Webui_raw.Window.create { debug = false })
+    |> Domain.join
+  in
+  expect_create_invalid_state "worker Domain" worker_result;
+  require (Webui_raw.Window.destroy window);
+  let sequential_window =
+    require (Webui_raw.Window.create { debug = false })
+  in
+  require (Webui_raw.Window.destroy sequential_window);
+  Printf.printf
+    "multi_window_stress: passed single_window_guard sequential_windows=2\n%!"
+
 let () =
   let cycles = ref 3 in
   let dispatch_count = ref 40 in
@@ -190,7 +222,10 @@ let () =
     ]
     ignore "multi_window_stress [options]";
   Printexc.record_backtrace true;
-  try run !cycles !dispatch_count
+  try
+    if Webui_raw.For_testing.multiple_windows_supported () then
+      run !cycles !dispatch_count
+    else run_single_window_guard ()
   with exn ->
     Printf.eprintf "multi_window_stress: failed: %s\n%s\n%!"
       (Printexc.to_string exn) (Printexc.get_backtrace ());

@@ -1,7 +1,8 @@
 # Phase 1 pending callback window-close spike
 
-This spike starts a three-second Domain task from a JavaScript binding and posts
-a real Win32 `WM_CLOSE` message while the Promise is pending.
+This spike starts a three-second Domain task from a JavaScript binding and
+requests a real platform-native close while the Promise is pending (`WM_CLOSE`
+on Windows, `gtk_window_close` on Linux).
 
 The lifecycle policy under test is:
 
@@ -25,7 +26,7 @@ then exits.
 
 ## Success criteria
 
-- Native `WM_CLOSE` is posted while a Domain task is pending.
+- A platform-native close is requested while a Domain task is pending.
 - No response dispatch is scheduled after the lifecycle enters `Closing`.
 - The Domain is joined before `Webview.destroy`.
 - Binding roots change from one before destroy to zero after destroy.
@@ -37,8 +38,9 @@ generated build copy. The upstream `owebview` submodule remains unchanged.
 
 ## Webui_raw migration (2026-07-19)
 
-The probe now posts a real `WM_CLOSE` through
-`Webui_raw.For_testing.Win32.post_wm_close` and reads per-Window diagnostics
+The probe now requests the real native close path through
+`Webui_raw.For_testing.Native_window.request_close` (a Win32 `WM_CLOSE` on
+Windows and `gtk_window_close` on Linux) and reads per-Window diagnostics
 from `Webui_raw.Diagnostics`. The generated owebview stub, patch script, and
 local native-close stub were removed. The paragraph above records the original
 Phase 1 implementation.

@@ -169,11 +169,18 @@ module For_testing : sig
   (** Exposes the one-shot state for failure-path assertions. *)
   val call_state : Call.t -> call
 
-  module Win32 : sig
-    (** Posts a real [WM_CLOSE] to the native HWND. This is a platform-specific
-        verification hook and is not an application close API. *)
-    val post_wm_close : Window.t -> (unit, Error.t) result
-    val current_thread_id : unit -> int
+  (** Stable only for comparing callback/worker identity within one process. *)
+  val current_thread_id : unit -> int
+
+  (** Whether multiple live native Windows are supported. Linux GTK currently
+      requires one live Window at a time, created on the process main thread. *)
+  val multiple_windows_supported : unit -> bool
+
+  module Native_window : sig
+    (** Requests close through the real native window path: [WM_CLOSE] on
+        Windows and [gtk_window_close] on Linux. This is a verification hook,
+        not an application close API. *)
+    val request_close : Window.t -> (unit, Error.t) result
   end
 end
 
