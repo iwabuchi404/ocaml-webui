@@ -17,3 +17,7 @@
 (executable
  (name window_close_stress)
  (libraries unix threads ocaml-webui.raw))
+
+(executable
+ (name multi_window_stress)
+ (libraries unix threads ocaml-webui.raw))

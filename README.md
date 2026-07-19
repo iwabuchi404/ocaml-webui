@@ -41,4 +41,5 @@ opam exec -- dune exec test/raw/lifecycle_probe.exe
 opam exec -- dune exec test/raw/dispatch_probe.exe
 opam exec -- dune exec test/raw/binding_probe.exe
 opam exec -- dune exec test/raw/window_close_stress.exe -- --iterations 100
+opam exec -- dune exec test/raw/multi_window_stress.exe -- --cycles 10 --dispatches 40
 ```
