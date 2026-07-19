@@ -21,3 +21,7 @@
 (executable
  (name multi_window_stress)
  (libraries unix threads ocaml-webui.raw))
+
+(executable
+ (name pending_call_stress)
+ (libraries unix threads ocaml-webui.raw))

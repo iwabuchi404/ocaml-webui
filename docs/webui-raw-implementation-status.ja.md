@@ -14,7 +14,7 @@ bindingを経由せず、固定した upstream `webview` を直接呼び出す�
 | 3. Window lifecycle | 完了 | create/config/run/close/destroy、owner-thread検査 |
 | 4. Dispatch queue | 完了 | Window単位queue、single wakeup、root/cancel/例外diagnostics |
 | 5. Binding/Call token | 完了 | registry、request copy、one-shot response、close cancel |
-| 6. Shutdown stress | 進行中 | randomized close、multi-Window/Domain/GC stress完了 |
+| 6. Shutdown stress | 進行中 | close、multi-Window/Domain/GC、pending Call競合完了 |
 | 7. Spike移行/API freeze | 未着手 | 最終gate |
 
 ## 実装済みAPI
@@ -55,6 +55,13 @@ Windows + OCaml 5.4.1 + MinGW-w64 + WebView2で次を確認した。
   - 2つのCPU-bound producer Domainから合計800件をdispatchし、全件実行
   - 16〜23 KiBのデータを各closureに保持した状態でallocationとmajor GCを反復
   - run終了時のdispatch queue/pending Callが0、destroy後の全rootが0
+- 48件のpending Callをshuffle順でresolve/reject/cancelし、closeと競合させるstressを
+  10サイクル実行: 全回成功
+  - 合計480 Callのうち30件がclose前にresponse/cancelを受理
+  - close側のcancelが先行した447件は `Already_completed`、競合中3件は
+    `Window_closing`
+  - 全480件の二重完了を `Already_completed` で拒否
+  - run終了時・destroy後ともpending Call/dispatch root/queueは0
 
 ## 実装中に判明した点
 
@@ -96,8 +103,7 @@ active callback中、およびそのbindingにpending Callがある間のremove�
 
 ## 次の実装
 
-Step 6では残るshutdown異常系を強化し、その後Step 7へ進む。
+Step 6では残るabnormal shutdown異常系を強化し、その後Step 7へ進む。
 
-1. 複数pending Callの終了順序をrandomizeする。
-2. abnormal run/native callback failureのcleanupを追加する。
-3. Phase 1 spikeをowned APIへ移行してStep 7 gateへ進む。
+1. abnormal run/native callback failureのcleanupを追加する。
+2. Phase 1 spikeをowned APIへ移行してStep 7 gateへ進む。
