@@ -23,6 +23,7 @@ let run_iteration random iteration =
   let executed = Atomic.make 0 in
   let rejected = Atomic.make 0 in
   let worker_error = Atomic.make None in
+  let dispatcher_ready = Atomic.make false in
   let close_delay = 0.002 +. Random.State.float random 0.025 in
   let dispatch_delays =
     Array.init 40 (fun _ -> Random.State.float random 0.002)
@@ -34,6 +35,7 @@ let run_iteration random iteration =
         try
           if not (wait_for_running window) then
             failwith "dispatcher did not observe Running";
+          Atomic.set dispatcher_ready true;
           Array.iteri
             (fun index delay ->
               Unix.sleepf delay;
@@ -56,6 +58,15 @@ let run_iteration random iteration =
         try
           if not (wait_for_running window) then
             failwith "closer did not observe Running";
+          let deadline = Unix.gettimeofday () +. 5.0 in
+          while
+            (not (Atomic.get dispatcher_ready))
+            && Unix.gettimeofday () < deadline
+          do
+            Thread.yield ()
+          done;
+          if not (Atomic.get dispatcher_ready) then
+            failwith "dispatcher did not become ready";
           Unix.sleepf close_delay;
           require (Webui_raw.Window.request_close window)
         with exn -> Atomic.set worker_error (Some exn))

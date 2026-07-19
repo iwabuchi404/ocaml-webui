@@ -63,8 +63,16 @@ external fail_next_close_dispatch : window -> unit
 external fail_next_response : window -> unit
   = "ocaml_webui_raw_fail_next_response"
 
+external post_wm_close : window -> native_error
+  = "ocaml_webui_raw_post_wm_close"
+
+external current_thread_id : unit -> int
+  = "ocaml_webui_raw_current_thread_id"
+
+external leaked_windows : unit -> int = "ocaml_webui_raw_leaked_windows"
+
 type diagnostics =
-  int * int * int * int * int * int * int * int * int
+  int * int * int * int * int * int * int * int * int * int
 
 external diagnostics : window -> diagnostics = "ocaml_webui_raw_diagnostics"
 external version : unit -> string = "ocaml_webui_raw_version"

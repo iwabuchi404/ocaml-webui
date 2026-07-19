@@ -2,6 +2,8 @@ open Webui_raw.Window
 
 type action = Resolve | Reject | Cancel
 
+type completion = Queued | Cancelled | Already_completed | Window_closing
+
 type counters = {
   sent : int Atomic.t;
   already_completed : int Atomic.t;
@@ -35,18 +37,34 @@ let make_counters () =
 let increment counter = ignore (Atomic.fetch_and_add counter 1)
 
 let record_completion counters = function
-  | `Sent -> increment counters.sent
-  | `Already_completed -> increment counters.already_completed
-  | `Window_closing -> increment counters.window_closing
+  | Queued | Cancelled -> increment counters.sent
+  | Already_completed -> increment counters.already_completed
+  | Window_closing -> increment counters.window_closing
 
 let complete action call index =
   match action with
   | Resolve ->
-      Webui_raw.Call.resolve_json call (Printf.sprintf "{\"index\":%d}" index)
+      (match
+         Webui_raw.Call.resolve_json call
+           (Printf.sprintf "{\"index\":%d}" index)
+       with
+      | `Queued -> Queued
+      | `Already_completed -> Already_completed
+      | `Window_closing -> Window_closing
+      | `Enqueue_failed error -> fail_error error)
   | Reject ->
-      Webui_raw.Call.reject_json call
-        (Printf.sprintf "{\"code\":\"rejected_%d\"}" index)
-  | Cancel -> Webui_raw.Call.cancel call
+      (match
+         Webui_raw.Call.reject_json call
+           (Printf.sprintf "{\"code\":\"rejected_%d\"}" index)
+       with
+      | `Queued -> Queued
+      | `Already_completed -> Already_completed
+      | `Window_closing -> Window_closing
+      | `Enqueue_failed error -> fail_error error)
+  | Cancel -> (
+      match Webui_raw.Call.cancel call with
+      | `Cancelled -> Cancelled
+      | `Already_completed -> Already_completed)
 
 let action_for index =
   match index mod 3 with 0 -> Resolve | 1 -> Reject | _ -> Cancel
@@ -67,6 +85,7 @@ let run_cycle ~cycle ~calls_per_cycle =
   let received = Atomic.make 0 in
   let close_result = Atomic.make None in
   let counters = make_counters () in
+  let first_completion_done = Atomic.make false in
   let calls = Array.init calls_per_cycle (fun _ -> Atomic.make None) in
   let binding =
     require
@@ -107,8 +126,9 @@ for (let index = 0; index < %d; index += 1) {
             in
             let first = complete (action_for index) call index in
             record_completion counters first;
+            if position = 0 then Atomic.set first_completion_done true;
             let duplicate = complete (action_for index) call index in
-            if duplicate = `Already_completed then
+            if duplicate = Already_completed then
               increment counters.duplicate_rejected
             else failwith "duplicate Call completion was accepted")
           order)
@@ -124,6 +144,12 @@ for (let index = 0; index < %d; index += 1) {
           Atomic.set close_result (Some (Error "calls were not registered"))
         else (
           Printf.printf "pending_call_stress: cycle=%d closer-ready\n%!" cycle;
+          let first_completion =
+            wait_until ~timeout:5.0 (fun () ->
+                Atomic.get first_completion_done)
+          in
+          if not first_completion then
+            failwith "first completion did not become ready";
           Unix.sleepf (0.035 +. (float_of_int (cycle mod 5) *. 0.003));
           match Webui_raw.Window.request_close window with
           | Ok () ->

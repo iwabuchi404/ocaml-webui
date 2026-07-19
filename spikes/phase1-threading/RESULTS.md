@@ -63,3 +63,17 @@ Command handlers must not perform blocking work on the binding callback. The
 next spike should run the three-second operation on a separate OCaml Domain and
 return the result through `Webview.dispatch`, while verifying thread identity,
 exception propagation, and shutdown behavior.
+
+## Webui_raw migration rerun (2026-07-19)
+
+The automatic probe was rerun against the owned `Webui_raw` implementation.
+
+- callback duration: 3010.969 ms
+- background dispatch queue delay: 2754.437 ms
+- browser Promise duration: 3039.2 ms
+- renderer maximum frame gap: 33.4 ms
+- callback and dispatch execution used UI thread 71664
+- dispatch request used worker thread 103320
+- exit code: 0
+
+The result preserves the original conclusion without an owebview stub copy.

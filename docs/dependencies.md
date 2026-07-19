@@ -42,11 +42,11 @@ distributed by this repository.
 - Commit: `57e78514bd9e4f32dcd99f1e8cacece69c25327c`
 - Local path: `vendor/owebview`
 - License: `vendor/owebview/LICENSE`
-- Role: reference implementation during `Webui_raw` migration
+- Role: historical/reference implementation; not a build dependency
 
-owebview is not the long-term binding dependency. The Phase 1 spikes still
-copy its stub temporarily; Step 7 removes that dependency after the owned
-binding passes the same probes.
+All Phase 1 spikes now use `Webui_raw` directly. No project-owned Dune target
+copies, patches, compiles, or links owebview's stubs. The submodule remains only
+to preserve the provenance of the original experiments and API comparison.
 
 ## Windows build toolchain
 
@@ -58,5 +58,5 @@ binding passes the same probes.
   `user32`, and `version`
 
 The selected compiler, include paths, and link flags are encoded by the shared
-`lib/raw/dune` build rule. The older focused spikes retain their local build
-configuration only as historical verification artifacts.
+`lib/raw/dune` build rule. The focused spikes link `ocaml-webui.raw` and retain
+only their measurement logic and historical results.

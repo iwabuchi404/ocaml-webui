@@ -83,3 +83,17 @@ failure dispatches completed and repeated runs remained stable.
 The next lifecycle spike must close the window while a Domain response is
 pending and verify dispatch failure handling, callback roots, Domain joining,
 and destruction order.
+
+## Webui_raw migration rerun (2026-07-19)
+
+The automatic success/failure sequence was rerun on `Webui_raw`.
+
+| Measurement | Success | Failure |
+|---|---:|---:|
+| callback duration | 14.583 ms | 0.500 ms |
+| UI response queue delay | 1.007 ms | 0.000 ms |
+| Promise duration | 3060.9 ms | 365.4 ms |
+| renderer maximum frame gap | 21.8 ms | 17.1 ms |
+
+Both worker thread IDs differed from the UI thread, the structured failure was
+rejected once, duplicate attempts were suppressed, and the process exited 0.

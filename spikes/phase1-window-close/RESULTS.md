@@ -66,4 +66,18 @@ fail if the upstream source no longer matches the reviewed shape. The
 - Workers must be joined before WebView destruction so they cannot reference a
   destroyed handle.
 - Binding cleanup belongs to `Webview.destroy`; dispatch closures need one-shot
-  root ownership and must be absent at destruction time.
+root ownership and must be absent at destruction time.
+
+## Webui_raw migration rerun (2026-07-19)
+
+The probe was rerun using the owned binding and its real Win32 `WM_CLOSE` hook.
+
+- `WM_CLOSE` post to `Window.run` return: 55.682 ms
+- Domain work duration: 3006.576 ms
+- pending response: cancelled after the native close
+- binding roots: 1 before destroy, 0 after destroy
+- dispatch roots: 0 before and after destroy
+- worker joined before explicit destroy
+- exit code: 0
+
+This reproduces the original native-close result without patching owebview.

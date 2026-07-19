@@ -4,8 +4,9 @@
 
 ## 現在地
 
-7段階計画の Step 1〜6 を実装した。`Webui_raw` は `owebview` のOCaml
-bindingを経由せず、固定した upstream `webview` を直接呼び出す。
+7段階計画の Step 1〜7 をWindowsで実装した。`Webui_raw` は `owebview` のOCaml
+bindingを経由せず、固定した upstream `webview` を直接呼び出す。公開APIはWindows版の
+freeze候補であり、cross-platform契約のfreezeはLinux検証後に行う。
 
 | Step | 状況 | 主な成果 |
 |---|---|---|
@@ -15,17 +16,22 @@ bindingを経由せず、固定した upstream `webview` を直接呼び出す�
 | 4. Dispatch queue | 完了 | Window単位queue、single wakeup、root/cancel/例外diagnostics |
 | 5. Binding/Call token | 完了 | registry、request copy、one-shot response、close cancel |
 | 6. Shutdown stress | 完了 | close、multi-Window/Domain/GC、pending Call、異常系cleanup |
-| 7. Spike移行/API freeze | 未着手 | 最終gate |
+| 7. Spike移行/API freeze | Windows完了 | 3 spike移行、意味論確定、WM_CLOSE/資源安全性gate |
 
 ## 実装済みAPI
 
-- `Window.create`, `run`, `request_close`, `destroy`
+- `Window.create`, `run`, `request_close`, `destroy`, `with_window`
 - `set_title`, `set_size`, `navigate`, `set_html`, `init`, `eval`
 - worker Domain/threadから利用できる `Window.dispatch`
 - `Binding.create/remove` とcopy済みrequest JSONを持つ `Call.t`
 - Domain-safeな `Call.resolve_json/reject_json/cancel`
-- lifecycle、root、queue、enqueue/execute/cancel、callback例外を返す
+  - responseの`Queued`はowner-thread queueへの受理でありJS到達保証ではない
+  - enqueue失敗は`Enqueue_failed Error.t`、close競合は`Window_closing`
+  - cancel成功はresponse送信と区別した`Cancelled`
+- lifecycle、root、queue、enqueue/execute/cancel、callback例外、native response失敗を返す
   `Diagnostics.snapshot`
+- 明示destroyなしでfinalizeされたWindowの累積値を返す
+  `Diagnostics.leaked_windows`
 - upstream native errorを例外ではなく `Error.t result` へ変換
 
 native contextはowner thread、lifecycle state、WebView handle、mutex、dispatch
@@ -66,8 +72,17 @@ Windows + OCaml 5.4.1 + MinGW-w64 + WebView2で次を確認した。
   - injected run failureはtyped `Run/Unspecified`を返して`Stopped`へ遷移
   - injected native response failureはCallを`Failed`にし、pending rootを解放
   - injected close dispatch failureはtyped `Request_close/Unspecified`を返し、
-    `Running`へrollbackしてpending Callをcancel
+    `Running`へ完全rollbackしてpending Callとqueued dispatchを維持
   - close失敗後の再close、destroy、全root/queue 0を確認
+- 実native HWNDへ`WM_CLOSE`をpostするprobeで、run return、pending Call cancel、
+  destroy後root 0を確認
+- `Window.with_window`の正常・例外経路でdestroyを確認
+- 意図的なdestroy忘れを別processでfinalizeし、native APIをfinalizerから呼ばず
+  `leaked_windows=1`として検出
+- Step 7移行後の3スパイクをWebView2実機で再実行し、全て成功
+  - threading: callback約3011 ms、Promise約3039 ms、最大frame gap 33.4 ms
+  - Domain success: callback 14.6 ms、Promise約3061 ms、最大frame gap 21.8 ms
+  - WM_CLOSE: close postからrun returnまで55.7 ms、pending response cancel、root 0
 
 ## 実装中に判明した点
 
@@ -113,15 +128,32 @@ Step 6ではnative異常を決定的に再現するone-shot fault injectionを`F
 
 - `webview_run`がエラーを返しても、queueとpending Callをcancelして`Stopped`へ収束する。
 - `webview_return`失敗時はCallを`Failed`へ移し、native pending registryから除去する。
-- close scheduling失敗時はWindowを`Running`へ戻す。ただしclose開始時点で所有権を
-  回収したpending Callとdispatchはcancel済みとし、late responseを許可しない。
+- close scheduling失敗時はWindowを`Running`へ戻し、pending Callとqueued dispatchの
+  所有権・diagnosticsもclose開始前へ完全rollbackする。成功時だけcancelする。
 - close scheduling faultはone-shotであり、その後の`request_close`で終了を再試行できる。
+
+### Step 7のfreeze候補で確定した意味論
+
+- native closeの再現はpublic HWNDを公開せず、`For_testing.Win32.post_wm_close`だけで行う。
+- response APIはdelivery保証を名乗らず、`Queued`とresponse失敗diagnosticsを分ける。
+- handler例外のfallback rejectは`{"code":"binding_callback_raised"}`に固定する。
+- 明示destroyが基本契約で、`Window.with_window`を推奨経路とする。finalizerは検出だけで
+  native destroyを行わない。
+- Windows固有hookは`For_testing.Win32`に隔離し、cross-platform公開契約へ含めない。
+
+### ストレステストの同期修正
+
+Step 7回帰中、close側がproducer/dispatcherの開始より先に進むと、ライブラリの不変条件
+ではなく「最低1件はclose前に処理する」というtest前提だけが破れる競合を確認した。
+`window_close_stress`はdispatcherが`Running`を観測してからcloseを開始し、
+`pending_call_stress`は初回completion後にcloseを競合させる。修正後は標準20 close反復、
+multi-Window 10 cycle、pending Call 10 cycle/480 Callが完走した。100 close反復は約4分を
+超えるため通常回帰から長時間soak枠へ移す。
 
 ## 次の実装
 
-Step 6の合格条件を満たしたため、Step 7「移行とraw契約のfreeze」へ進む。
-
-1. 3つのPhase 1 spikeをpatch scriptなしで`Webui_raw`へ移行する。
-2. `owebview`をbuild dependencyから削除する。
-3. 公開`.mli`、lifecycle図、supported-thread表をreviewする。
-4. clean root buildと全実機probe後にraw API契約をfreezeする。
+1. Linuxでcompile gateを作り、Window lifecycle、dispatch、binding/Callの意味論差を洗う。
+2. Linux実機runtime probeをWindowsと同じ不変条件で通し、必要なplatform abstractionだけを
+   `lib/raw`内部へ追加する。
+3. Windows/Linuxで公開`.mli`が一致した時点でcross-platform raw APIをfreezeする。
+4. その後にmacOS compile/runtime検証を加え、上位の手書きbridge baselineへ進む。

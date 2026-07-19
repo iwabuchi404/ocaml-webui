@@ -51,6 +51,8 @@ struct pending_call_context {
   value cancel;
 };
 
+static std::atomic<std::uint64_t> leaked_windows{0};
+
 struct window_context {
   webview_t handle;
   std::atomic<int> state;
@@ -63,6 +65,7 @@ struct window_context {
   std::uint64_t dispatch_executed;
   std::uint64_t dispatch_cancelled;
   std::uint64_t callback_exceptions;
+  std::uint64_t response_failures;
   bool fail_next_dispatch;
   bool fail_next_run;
   bool fail_next_close_dispatch;
@@ -77,7 +80,7 @@ struct window_context {
       : handle(native_handle), state(STATE_CREATED),
         owner_thread_id(GetCurrentThreadId()), dispatch_wakeup_scheduled(false),
         dispatch_roots(0), dispatch_enqueued(0), dispatch_executed(0),
-        dispatch_cancelled(0), callback_exceptions(0),
+        dispatch_cancelled(0), callback_exceptions(0), response_failures(0),
         fail_next_dispatch(false), fail_next_run(false),
         fail_next_close_dispatch(false), fail_next_response(false),
         binding_mutation_in_progress(false),
@@ -104,6 +107,8 @@ static void finalize_window(value vwindow) {
   if (context->state.load(std::memory_order_acquire) == STATE_DESTROYED &&
       context->handle == nullptr) {
     delete context;
+  } else {
+    leaked_windows.fetch_add(1, std::memory_order_relaxed);
   }
   *slot = nullptr;
 }
@@ -301,7 +306,13 @@ static void binding_callback(const char *id, const char *request,
   if (raised) {
     // The OCaml wrapper normally converts handler exceptions into a rejected
     // Call. This is a final defensive response for exceptions in that wrapper.
-    webview_return(context->handle, id, 1, "\"binding callback raised\"");
+    const webview_error_t response_error =
+        webview_return(context->handle, id, 1,
+                       "{\"code\":\"binding_callback_raised\"}");
+    if (response_error != WEBVIEW_ERROR_OK) {
+      std::lock_guard<std::mutex> lock(context->dispatch_mutex);
+      ++context->response_failures;
+    }
   }
   if (delete_after_callback) {
     delete binding;
@@ -457,6 +468,7 @@ CAMLprim value ocaml_webui_raw_request_close(value vwindow) {
   std::deque<dispatch_item *> cancelled;
   std::vector<pending_call_context *> pending_calls;
   webview_error_t error = WEBVIEW_ERROR_OK;
+  bool dispatch_wakeup_was_scheduled = false;
   {
     std::lock_guard<std::mutex> lock(context->dispatch_mutex);
     int expected = STATE_RUNNING;
@@ -468,13 +480,10 @@ CAMLprim value ocaml_webui_raw_request_close(value vwindow) {
       CAMLreturn(
           alloc_invalid_state("request_close requires Running or Closing"));
     }
+    dispatch_wakeup_was_scheduled = context->dispatch_wakeup_scheduled;
     cancelled.swap(context->dispatch_queue);
     context->dispatch_wakeup_scheduled = false;
     context->dispatch_cancelled += cancelled.size();
-    for (auto &entry : context->pending_calls) {
-      pending_calls.push_back(entry.second);
-    }
-    context->pending_calls.clear();
     // The scheduling call is asynchronous on supported backends. Keep it
     // serialized with queue acceptance and the transition to Stopped so the
     // native handle cannot be destroyed while scheduling is in flight.
@@ -486,13 +495,24 @@ CAMLprim value ocaml_webui_raw_request_close(value vwindow) {
           webview_dispatch(context->handle, terminate_on_ui_thread, context);
     }
     if (error != WEBVIEW_ERROR_OK) {
+      const std::size_t cancelled_count = cancelled.size();
       int expected = STATE_CLOSING;
       context->state.compare_exchange_strong(expected, STATE_RUNNING,
                                              std::memory_order_acq_rel);
+      context->dispatch_queue.swap(cancelled);
+      context->dispatch_wakeup_scheduled = dispatch_wakeup_was_scheduled;
+      context->dispatch_cancelled -= cancelled_count;
+    } else {
+      for (auto &entry : context->pending_calls) {
+        pending_calls.push_back(entry.second);
+      }
+      context->pending_calls.clear();
     }
   }
-  cancel_pending_calls(context, pending_calls);
-  cancel_dispatches(context, cancelled);
+  if (error == WEBVIEW_ERROR_OK) {
+    cancel_pending_calls(context, pending_calls);
+    cancel_dispatches(context, cancelled);
+  }
   CAMLreturn(alloc_native_error(error));
 }
 
@@ -883,17 +903,28 @@ CAMLprim value ocaml_webui_raw_return(value vwindow, value vid, value vstatus,
   if (state != STATE_RUNNING && state != STATE_CLOSING) {
     CAMLreturn(alloc_invalid_state("respond requires Running or Closing"));
   }
+  bool inject_failure = false;
   {
     std::lock_guard<std::mutex> lock(context->dispatch_mutex);
     if (context->fail_next_response) {
       context->fail_next_response = false;
-      CAMLreturn(alloc_error_option(
-          static_cast<int>(WEBVIEW_ERROR_UNSPECIFIED),
-          "injected native response failure"));
+      inject_failure = true;
     }
   }
-  CAMLreturn(alloc_native_error(webview_return(
-      context->handle, String_val(vid), Int_val(vstatus), String_val(vresult))));
+  const webview_error_t error =
+      inject_failure
+          ? WEBVIEW_ERROR_UNSPECIFIED
+          : webview_return(context->handle, String_val(vid), Int_val(vstatus),
+                           String_val(vresult));
+  if (error != WEBVIEW_ERROR_OK) {
+    std::lock_guard<std::mutex> lock(context->dispatch_mutex);
+    ++context->response_failures;
+  }
+  if (inject_failure) {
+    CAMLreturn(alloc_error_option(static_cast<int>(error),
+                                  "injected native response failure"));
+  }
+  CAMLreturn(alloc_native_error(error));
 }
 
 CAMLprim value ocaml_webui_raw_record_callback_exception(value vwindow) {
@@ -946,6 +977,36 @@ CAMLprim value ocaml_webui_raw_fail_next_response(value vwindow) {
   CAMLreturn(Val_unit);
 }
 
+CAMLprim value ocaml_webui_raw_post_wm_close(value vwindow) {
+  CAMLparam1(vwindow);
+  window_context *context = context_of_value(vwindow);
+  if (context->state.load(std::memory_order_acquire) != STATE_RUNNING) {
+    CAMLreturn(alloc_invalid_state("WM_CLOSE requires the Running state"));
+  }
+  HWND window = static_cast<HWND>(webview_get_window(context->handle));
+  if (window == nullptr) {
+    CAMLreturn(alloc_error_option(
+        static_cast<int>(WEBVIEW_ERROR_INVALID_STATE),
+        "webview_get_window returned a null HWND"));
+  }
+  if (!PostMessageW(window, WM_CLOSE, 0, 0)) {
+    CAMLreturn(alloc_error_option(
+        static_cast<int>(WEBVIEW_ERROR_UNSPECIFIED),
+        "PostMessageW(WM_CLOSE) failed"));
+  }
+  CAMLreturn(Val_none);
+}
+
+CAMLprim value ocaml_webui_raw_current_thread_id(value vunit) {
+  CAMLparam1(vunit);
+  CAMLreturn(Val_long(GetCurrentThreadId()));
+}
+
+CAMLprim value ocaml_webui_raw_leaked_windows(value vunit) {
+  CAMLparam1(vunit);
+  CAMLreturn(Val_long(leaked_windows.load(std::memory_order_relaxed)));
+}
+
 CAMLprim value ocaml_webui_raw_diagnostics(value vwindow) {
   CAMLparam1(vwindow);
   CAMLlocal1(vsnapshot);
@@ -960,6 +1021,7 @@ CAMLprim value ocaml_webui_raw_diagnostics(value vwindow) {
   std::uint64_t dispatch_executed;
   std::uint64_t dispatch_cancelled;
   std::uint64_t callback_exceptions;
+  std::uint64_t response_failures;
   {
     std::lock_guard<std::mutex> lock(context->dispatch_mutex);
     state = context->state.load(std::memory_order_acquire);
@@ -971,9 +1033,10 @@ CAMLprim value ocaml_webui_raw_diagnostics(value vwindow) {
     dispatch_executed = context->dispatch_executed;
     dispatch_cancelled = context->dispatch_cancelled;
     callback_exceptions = context->callback_exceptions;
+    response_failures = context->response_failures;
   }
 
-  vsnapshot = caml_alloc_tuple(9);
+  vsnapshot = caml_alloc_tuple(10);
   Store_field(vsnapshot, 0, Val_int(state));
   Store_field(vsnapshot, 1, Val_long(binding_roots));
   Store_field(vsnapshot, 2, Val_long(dispatch_roots));
@@ -983,6 +1046,7 @@ CAMLprim value ocaml_webui_raw_diagnostics(value vwindow) {
   Store_field(vsnapshot, 6, Val_long(dispatch_executed));
   Store_field(vsnapshot, 7, Val_long(dispatch_cancelled));
   Store_field(vsnapshot, 8, Val_long(callback_exceptions));
+  Store_field(vsnapshot, 9, Val_long(response_failures));
   CAMLreturn(vsnapshot);
 }
 

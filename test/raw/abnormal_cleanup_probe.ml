@@ -110,7 +110,7 @@ let test_response_failure () =
   require (Webui_raw.Window.run window);
   join_thread closer closer_outcome;
   (match Atomic.get first_completion with
-  | Some `Sent -> ()
+  | Some `Queued -> ()
   | _ -> failwith "response failure was not accepted into dispatch");
   (match Atomic.get duplicate_completion with
   | Some `Already_completed -> ()
@@ -119,6 +119,9 @@ let test_response_failure () =
   | Some call when Webui_raw.For_testing.call_state call = Failed -> ()
   | _ -> failwith "native response failure did not leave Call in Failed");
   expect_zero_work window "native response failure";
+  let before_destroy = Webui_raw.Diagnostics.snapshot window in
+  if before_destroy.response_failures <> 1 then
+    failwith "native response failure was not recorded exactly once";
   require (Webui_raw.Window.destroy window);
   expect_destroyed_without_roots window "native response failure"
 
@@ -127,6 +130,14 @@ let test_close_dispatch_failure () =
   let captured_call = Atomic.make None in
   let first_close = Atomic.make None in
   let state_after_failure = Atomic.make None in
+  let call_state_after_failure = Atomic.make None in
+  let pending_after_failure = Atomic.make None in
+  let queued_after_failure = Atomic.make None in
+  let cancelled_before_failure = Atomic.make None in
+  let cancelled_after_failure = Atomic.make None in
+  let blocker_started = Atomic.make false in
+  let release_blocker = Atomic.make false in
+  let preserved_dispatch_executed = Atomic.make false in
   let closer_outcome = Atomic.make None in
   ignore
     (require
@@ -147,11 +158,49 @@ let test_close_dispatch_failure () =
             in
             if not call_registered then
               failwith "pending Call was not registered";
-            Webui_raw.For_testing.fail_next_close_dispatch window;
-            Atomic.set first_close
-              (Some (Webui_raw.Window.request_close window));
-            Atomic.set state_after_failure
-              (Some (Webui_raw.Window.state window));
+            Fun.protect
+              ~finally:(fun () -> Atomic.set release_blocker true)
+              (fun () ->
+                require
+                  (Webui_raw.Window.dispatch window (fun () ->
+                       Atomic.set blocker_started true;
+                       while not (Atomic.get release_blocker) do
+                         Unix.sleepf 0.002
+                       done));
+                if
+                  not
+                    (wait_until ~timeout:10.0 (fun () ->
+                         Atomic.get blocker_started))
+                then failwith "dispatch blocker did not start";
+                require
+                  (Webui_raw.Window.dispatch window (fun () ->
+                       Atomic.set preserved_dispatch_executed true));
+                Atomic.set cancelled_before_failure
+                  (Some
+                     (Webui_raw.Diagnostics.snapshot window)
+                       .dispatch_cancelled);
+                Webui_raw.For_testing.fail_next_close_dispatch window;
+                Atomic.set first_close
+                  (Some (Webui_raw.Window.request_close window));
+                Atomic.set state_after_failure
+                  (Some (Webui_raw.Window.state window));
+                (match Atomic.get captured_call with
+                | Some call ->
+                    Atomic.set call_state_after_failure
+                      (Some (Webui_raw.For_testing.call_state call))
+                | None ->
+                    failwith "pending Call disappeared during close failure");
+                let snapshot = Webui_raw.Diagnostics.snapshot window in
+                Atomic.set pending_after_failure (Some snapshot.pending_calls);
+                Atomic.set queued_after_failure
+                  (Some snapshot.queued_dispatches);
+                Atomic.set cancelled_after_failure
+                  (Some snapshot.dispatch_cancelled));
+            if
+              not
+                (wait_until ~timeout:10.0 (fun () ->
+                     Atomic.get preserved_dispatch_executed))
+            then failwith "failed close did not preserve its queued dispatch";
             require (Webui_raw.Window.request_close window)))
       ()
   in
@@ -163,6 +212,19 @@ let test_close_dispatch_failure () =
   (match Atomic.get state_after_failure with
   | Some Running -> ()
   | _ -> failwith "failed close did not roll back to Running");
+  (match Atomic.get call_state_after_failure with
+  | Some Pending -> ()
+  | _ -> failwith "failed close did not preserve its pending Call state");
+  (match Atomic.get pending_after_failure with
+  | Some 1 -> ()
+  | _ -> failwith "failed close did not preserve its native pending Call");
+  (match Atomic.get queued_after_failure with
+  | Some 1 -> ()
+  | _ -> failwith "failed close did not preserve its native dispatch queue");
+  if Atomic.get cancelled_after_failure <> Atomic.get cancelled_before_failure
+  then failwith "failed close changed dispatch cancellation diagnostics";
+  if not (Atomic.get preserved_dispatch_executed) then
+    failwith "preserved dispatch did not execute after close rollback";
   (match Atomic.get captured_call with
   | Some call when Webui_raw.For_testing.call_state call = Cancelled ->
       if Webui_raw.Call.resolve_json call "null" <> `Already_completed then

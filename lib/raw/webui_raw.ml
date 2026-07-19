@@ -114,6 +114,20 @@ module Window = struct
   let destroy window =
     of_native_result Error.Destroy (Webui_raw_native.destroy window)
 
+  let with_window config callback =
+    match create config with
+    | Error _ as error -> error
+    | Ok window -> (
+        match callback window with
+        | value -> (
+            match destroy window with
+            | Ok () -> Ok value
+            | Error error -> Error error)
+        | exception exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            ignore (destroy window);
+            Printexc.raise_with_backtrace exn backtrace)
+
   let set_title window title =
     of_native_result Error.Set_title
       (Webui_raw_native.set_title window title)
@@ -160,7 +174,13 @@ module Call = struct
     state : state Atomic.t;
   }
 
-  type completion = [ `Sent | `Already_completed | `Window_closing ]
+  type response_submission =
+    [ `Queued
+    | `Already_completed
+    | `Window_closing
+    | `Enqueue_failed of Error.t ]
+
+  type cancellation = [ `Cancelled | `Already_completed ]
 
   let finish call = Webui_raw_native.finish_call call.window call.id
 
@@ -203,17 +223,21 @@ module Call = struct
       in
       let cancel () = ignore (mark_cancelled call) in
       match Webui_raw_native.dispatch call.window execute cancel with
-      | None -> `Sent
-      | Some _ ->
+      | None -> `Queued
+      | Some (code, message) ->
           if Atomic.compare_and_set call.state Dispatch_queued Failed then
             finish call;
-          `Window_closing
+          let error =
+            Error.make Error.Dispatch (code_of_native code) message
+          in
+          if error.code = Error.Invalid_state then `Window_closing
+          else `Enqueue_failed error
 
   let resolve_json call result_json = respond call 0 result_json
   let reject_json call result_json = respond call 1 result_json
 
   let cancel call =
-    if mark_cancelled call then `Sent else `Already_completed
+    if mark_cancelled call then `Cancelled else `Already_completed
 end
 
 module Binding = struct
@@ -232,7 +256,9 @@ module Binding = struct
           try handler call
           with _ ->
             Webui_raw_native.record_callback_exception window;
-            ignore (Call.reject_json call "\"binding callback raised\""))
+            ignore
+              (Call.reject_json call
+                 "{\"code\":\"binding_callback_raised\"}"))
     in
     match Webui_raw_native.bind window name native_handler with
     | Webui_raw_native.Bound token ->
@@ -262,6 +288,7 @@ module Diagnostics = struct
     dispatch_executed : int;
     dispatch_cancelled : int;
     callback_exceptions : int;
+    response_failures : int;
   }
 
   let snapshot window =
@@ -273,7 +300,8 @@ module Diagnostics = struct
           dispatch_enqueued,
           dispatch_executed,
           dispatch_cancelled,
-          callback_exceptions ) =
+          callback_exceptions,
+          response_failures ) =
       Webui_raw_native.diagnostics window
     in
     let window_state =
@@ -296,7 +324,10 @@ module Diagnostics = struct
       dispatch_executed;
       dispatch_cancelled;
       callback_exceptions;
+      response_failures;
     }
+
+  let leaked_windows = Webui_raw_native.leaked_windows
 end
 
 module For_testing = struct
@@ -307,6 +338,14 @@ module For_testing = struct
   let fail_next_close_dispatch = Webui_raw_native.fail_next_close_dispatch
   let fail_next_response = Webui_raw_native.fail_next_response
   let call_state = Call.state
+
+  module Win32 = struct
+    let post_wm_close window =
+      of_native_result Error.Request_close
+        (Webui_raw_native.post_wm_close window)
+
+    let current_thread_id = Webui_raw_native.current_thread_id
+  end
 end
 
 let version = Webui_raw_native.version

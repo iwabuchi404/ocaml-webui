@@ -62,6 +62,11 @@ module Window : sig
       [Created] or [Stopped]. Calling it again after success is harmless. *)
   val destroy : t -> (unit, Error.t) result
 
+  (** Creates a Window, passes it to [callback], and destroys it on the owner
+      thread when [callback] returns or raises. Callback exceptions are
+      re-raised after a best-effort destroy. *)
+  val with_window : config -> (t -> 'a) -> ('a, Error.t) result
+
   val set_title : t -> string -> (unit, Error.t) result
 
   val set_size :
@@ -88,12 +93,21 @@ module Call : sig
     | Cancelled
     | Failed
 
-  type completion = [ `Sent | `Already_completed | `Window_closing ]
+  type response_submission =
+    [ `Queued
+    | `Already_completed
+    | `Window_closing
+    | `Enqueue_failed of Error.t ]
+
+  type cancellation = [ `Cancelled | `Already_completed ]
 
   val request_json : t -> string
-  val resolve_json : t -> string -> completion
-  val reject_json : t -> string -> completion
-  val cancel : t -> completion
+  (* [result_json] must contain valid JSON. [`Queued] means that the response
+     was accepted for owner-thread delivery; it does not guarantee that the
+     native engine ultimately delivered it to JavaScript. *)
+  val resolve_json : t -> string -> response_submission
+  val reject_json : t -> string -> response_submission
+  val cancel : t -> cancellation
 end
 
 module Binding : sig
@@ -122,9 +136,15 @@ module Diagnostics : sig
     dispatch_executed : int;
     dispatch_cancelled : int;
     callback_exceptions : int;
+    response_failures : int;
   }
 
   val snapshot : Window.t -> snapshot
+
+  (** Number of Window values finalized without an explicit successful
+      [Window.destroy] in this process. Native cleanup is intentionally not
+      attempted from the GC finalizer. *)
+  val leaked_windows : unit -> int
 end
 
 (** Unstable helpers for state-machine tests. Application code must not use
@@ -148,6 +168,13 @@ module For_testing : sig
 
   (** Exposes the one-shot state for failure-path assertions. *)
   val call_state : Call.t -> call
+
+  module Win32 : sig
+    (** Posts a real [WM_CLOSE] to the native HWND. This is a platform-specific
+        verification hook and is not an application close API. *)
+    val post_wm_close : Window.t -> (unit, Error.t) result
+    val current_thread_id : unit -> int
+  end
 end
 
 val version : unit -> string

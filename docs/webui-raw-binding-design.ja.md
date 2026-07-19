@@ -49,9 +49,10 @@ Phase 1のWindows/WebView2実機検証で、次が判明した。
    Windows access violation `0xC0000005`を再現した。
 7. owebviewのbuild skeletonは今回のWindows toolchainをサポートしていない。
 
-現在のスパイクはowebviewのC++ stubをbuild時にコピーしてパッチしている。
-仮説検証としては適切だが、productionの依存境界にはできない。今後のbridge、
-cancellation、traceはすべてこの層に依存するため、手書きbridgeより先に所有する。
+初期スパイクはowebviewのC++ stubをbuild時にコピーしてパッチしていた。
+仮説検証には有効だったがproductionの依存境界にはできないため、現在は3スパイク
+すべてを`Webui_raw`へ移行した。今後のbridge、cancellation、traceはこの所有bindingを
+基盤にする。
 
 ## 3. 参照元
 
@@ -67,9 +68,8 @@ cancellation、traceはすべてこの層に依存するため、手書きbridge
 - `spikes/phase1-domain-dispatch/`
 - `spikes/phase1-window-close/`
 
-移行中はowebviewを参照専用submoduleとして残す。機能同等性と回帰テストが
-通った後にbuild依存から削除する。その後は上流`webview`を直接固定し、licenseと
-正確なrevisionを記録する。
+owebviewは参照専用submoduleとして残すがbuild依存にはしない。上流`webview`を直接
+固定し、licenseと正確なrevisionを記録する。
 
 ## 4. 目標
 
@@ -174,6 +174,7 @@ module Window : sig
   val run : t -> (unit, Error.t) result
   val request_close : t -> (unit, Error.t) result
   val destroy : t -> (unit, Error.t) result
+  val with_window : config -> (t -> 'a) -> ('a, Error.t) result
 
   val set_title : t -> string -> (unit, Error.t) result
   val set_size :
@@ -188,15 +189,18 @@ end
 module Call : sig
   type t
 
-  type completion =
-    [ `Sent
+  type response_submission =
+    [ `Queued
     | `Already_completed
-    | `Window_closing ]
+    | `Window_closing
+    | `Enqueue_failed of Error.t ]
+
+  type cancellation = [ `Cancelled | `Already_completed ]
 
   val request_json : t -> string
-  val resolve_json : t -> string -> completion
-  val reject_json : t -> string -> completion
-  val cancel : t -> completion
+  val resolve_json : t -> string -> response_submission
+  val reject_json : t -> string -> response_submission
+  val cancel : t -> cancellation
 end
 
 module Binding : sig
@@ -214,15 +218,22 @@ module Diagnostics : sig
     dispatch_roots : int;
     pending_calls : int;
     queued_dispatches : int;
+    dispatch_enqueued : int;
+    dispatch_executed : int;
+    dispatch_cancelled : int;
+    callback_exceptions : int;
+    response_failures : int;
   }
 
   val snapshot : Window.t -> snapshot
+  val leaked_windows : unit -> int
 end
 ```
 
 最初の版では境界のJSONを文字列として扱う。JSON validityとtyped codecは上位bridgeの
-責務とする。一方、`Call.t`はresponse stateを所有し、二重応答やshutdown後応答を
-行えないようにする。
+責務とする。`Queued`はowner-thread delivery queueへの受理であり、JavaScriptへの到達
+保証ではない。native response失敗は`response_failures`で観測する。一方、`Call.t`は
+response stateを所有し、二重応答やshutdown後応答を行えないようにする。
 
 ## 8. Webui_raw内部のレイヤー
 
@@ -578,8 +589,9 @@ runtime所有権をC++ container mutexの代わりにしない。
 
 Risk: native Window/contextとregistered rootがleakする。
 
-対策: 上位に`with_window`/application scope helperを用意し、debug lifecycle-leakと
-root countを公開する。finalizer threadから危険なdestroyをしない。
+対策: `Window.with_window`を標準のscope helperとして提供し、
+`Diagnostics.leaked_windows`とroot countを公開する。finalizer threadから危険な
+destroyをせず、呼び忘れは検出可能なleakとして扱う。
 
 ### Build portability
 
@@ -608,4 +620,3 @@ macOS/Linuxはruntime testが通るまでsupportを表明しない。
 5. explicit destroyを使い、GC finalizerからnative Windowをdestroyしない。
 6. closeとresponse dispatchを同期されたstate transitionとして扱う。
 7. clean root buildとrandomized shutdown stressをPhase 2開始条件にする。
-

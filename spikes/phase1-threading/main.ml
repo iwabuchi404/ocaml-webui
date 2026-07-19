@@ -1,27 +1,38 @@
 module Webview = struct
-  type t
+  let fail_error error = failwith (Webui_raw.Error.to_string error)
+  let require = function Ok value -> value | Error error -> fail_error error
+  let create debug = require (Webui_raw.Window.create { debug })
+  let destroy window = require (Webui_raw.Window.destroy window)
+  let run window = require (Webui_raw.Window.run window)
+  let terminate window = require (Webui_raw.Window.request_close window)
+  let set_title window title = require (Webui_raw.Window.set_title window title)
 
-  external create : bool -> t = "ocaml_webview_create"
-  external destroy : t -> unit = "ocaml_webview_destroy"
-  external run : t -> unit = "ocaml_webview_run"
-  external terminate : t -> unit = "ocaml_webview_terminate"
-  external set_title : t -> string -> unit = "ocaml_webview_set_title"
+  let set_size window width height _hint =
+    require (Webui_raw.Window.set_size window ~width ~height Initial)
 
-  external set_size : t -> int -> int -> int -> unit
-    = "ocaml_webview_set_size"
+  let set_html window html = require (Webui_raw.Window.set_html window html)
 
-  external set_html : t -> string -> unit = "ocaml_webview_set_html"
+  let bind window name handler =
+    ignore
+      (require
+         (Webui_raw.Binding.create window ~name (fun call ->
+              handler call (Webui_raw.Call.request_json call))))
 
-  external bind : t -> string -> (string -> string -> unit) -> unit
-    = "ocaml_webview_bind"
+  let dispatch window callback =
+    require (Webui_raw.Window.dispatch window (fun () -> callback window))
 
-  external dispatch : t -> (t -> unit) -> unit = "ocaml_webview_dispatch"
-
-  external return : t -> string -> int -> string -> unit
-    = "ocaml_webview_return"
+  let return _window call status payload =
+    let submission =
+      if status = 0 then Webui_raw.Call.resolve_json call payload
+      else Webui_raw.Call.reject_json call payload
+    in
+    match submission with
+    | `Queued | `Already_completed -> ()
+    | `Window_closing -> failwith "response rejected while Window is closing"
+    | `Enqueue_failed error -> fail_error error
 end
 
-external current_thread_id : unit -> int = "ocaml_current_thread_id"
+let current_thread_id = Webui_raw.For_testing.Win32.current_thread_id
 
 let started_at = Unix.gettimeofday ()
 
@@ -205,4 +216,3 @@ let () =
     Printf.eprintf "fatal: %s\n%s\n%!" (Printexc.to_string exn)
       (Printexc.get_backtrace ());
     exit 1
-

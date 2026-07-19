@@ -35,3 +35,10 @@ then exits.
 The root counters and the `CAMLdrop` cleanup-order correction exist only in the
 generated build copy. The upstream `owebview` submodule remains unchanged.
 
+## Webui_raw migration (2026-07-19)
+
+The probe now posts a real `WM_CLOSE` through
+`Webui_raw.For_testing.Win32.post_wm_close` and reads per-Window diagnostics
+from `Webui_raw.Diagnostics`. The generated owebview stub, patch script, and
+local native-close stub were removed. The paragraph above records the original
+Phase 1 implementation.

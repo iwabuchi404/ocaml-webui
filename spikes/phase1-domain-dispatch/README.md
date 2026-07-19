@@ -39,3 +39,9 @@ The upstream `owebview` trampolines release the OCaml runtime lock before
 `0xC0000005`. This spike generates its build copy with the two operations
 reordered so OCaml local roots are removed while the runtime lock is still held.
 The submodule source remains unchanged.
+
+## Webui_raw migration (2026-07-19)
+
+The probe now uses `Webui_raw.Binding` and one-shot `Webui_raw.Call` responses.
+The generated owebview stub and `patch_webview_stubs.ps1` were removed. The FFI
+patch discussion above remains as the historical reason for owning the binding.

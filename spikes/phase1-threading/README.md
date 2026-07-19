@@ -49,3 +49,8 @@ Its vendored webview 0.12 header does contain the WebView2 backend. This spike
 reuses the upstream OCaml stubs and supplies the documented MinGW Windows
 libraries locally without modifying the submodule.
 
+## Webui_raw migration (2026-07-19)
+
+The executable now links `ocaml-webui.raw` directly. It no longer copies the
+owebview stub or maintains local WebView2 link rules. The historical dependency
+note above describes the original Phase 1 setup and is retained as evidence.

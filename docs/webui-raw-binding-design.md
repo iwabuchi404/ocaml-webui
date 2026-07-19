@@ -50,11 +50,10 @@ Phase 1 established the following facts on Windows/WebView2:
    a reproducible Windows access violation `0xC0000005` during Domain dispatch.
 7. owebview's build skeleton does not support the Windows toolchain used here.
 
-The current spikes patch a generated copy of owebview's C++ stub. That was the
-right way to isolate a hypothesis, but it is not an acceptable production
-dependency boundary. All later bridge, cancellation, and trace work would rest
-on this safety-critical layer, so ownership moves here before the handwritten
-bridge baseline.
+The initial spikes patched a generated copy of owebview's C++ stub. That was
+useful for isolating a hypothesis but was not an acceptable production
+dependency boundary, so all three spikes now run on `Webui_raw`. Later bridge,
+cancellation, and trace work builds on this owned binding.
 
 ## 3. Sources used as references
 
@@ -69,9 +68,8 @@ The implementation may reuse ideas, not the unsafe lifecycle assumptions, from:
 - `spikes/phase1-domain-dispatch/`
 - `spikes/phase1-window-close/`
 
-owebview remains a reference-only submodule during migration. After feature
-parity and regression tests pass, it is removed as a build dependency. The
-upstream `webview` library is then pinned directly, with its license and exact
+owebview remains a reference-only submodule and is not a build dependency. The
+upstream `webview` library is pinned directly, with its license and exact
 revision recorded.
 
 ## 4. Goals
@@ -179,6 +177,7 @@ module Window : sig
   val run : t -> (unit, Error.t) result
   val request_close : t -> (unit, Error.t) result
   val destroy : t -> (unit, Error.t) result
+  val with_window : config -> (t -> 'a) -> ('a, Error.t) result
 
   val set_title : t -> string -> (unit, Error.t) result
   val set_size :
@@ -194,15 +193,18 @@ end
 module Call : sig
   type t
 
-  type completion =
-    [ `Sent
+  type response_submission =
+    [ `Queued
     | `Already_completed
-    | `Window_closing ]
+    | `Window_closing
+    | `Enqueue_failed of Error.t ]
+
+  type cancellation = [ `Cancelled | `Already_completed ]
 
   val request_json : t -> string
-  val resolve_json : t -> string -> completion
-  val reject_json : t -> string -> completion
-  val cancel : t -> completion
+  val resolve_json : t -> string -> response_submission
+  val reject_json : t -> string -> response_submission
+  val cancel : t -> cancellation
 end
 
 module Binding : sig
@@ -224,15 +226,23 @@ module Diagnostics : sig
     dispatch_roots : int;
     pending_calls : int;
     queued_dispatches : int;
+    dispatch_enqueued : int;
+    dispatch_executed : int;
+    dispatch_cancelled : int;
+    callback_exceptions : int;
+    response_failures : int;
   }
 
   val snapshot : Window.t -> snapshot
+  val leaked_windows : unit -> int
 end
 ```
 
 The first version uses JSON strings at this boundary. JSON validity and typed
-codec behavior belong to the higher-level bridge. `Call.t` still owns response
-state so an invalid caller cannot respond twice or respond after shutdown.
+codec behavior belong to the higher-level bridge. `Queued` means acceptance by
+the owner-thread delivery queue, not confirmed delivery to JavaScript; native
+response failures are exposed through `response_failures`. `Call.t` still owns
+response state so a caller cannot respond twice or respond after shutdown.
 
 ## 8. Layering inside Webui_raw
 
@@ -651,9 +661,9 @@ runtime. Never treat runtime ownership as a C++ container mutex.
 
 Risk: a forgotten destroy leaks a native window/context and registered roots.
 
-Mitigation: provide higher-level `with_window`/application scope helpers later,
-emit a debug lifecycle-leak diagnostic, and make root counts test-visible. Do
-not trade a detectable leak for unsafe finalizer-thread destruction.
+Mitigation: provide `Window.with_window` as the standard scope helper and expose
+`Diagnostics.leaked_windows` plus root counts. Do not trade a detectable leak
+for unsafe finalizer-thread destruction.
 
 ### Build portability
 
@@ -683,4 +693,3 @@ None of these questions blocks ownership of the minimal safe Windows binding.
 5. Use explicit destroy; never destroy a native window from a GC finalizer.
 6. Treat close versus response dispatch as a synchronized state transition.
 7. Require clean root-build and randomized shutdown stress before Phase 2.
-

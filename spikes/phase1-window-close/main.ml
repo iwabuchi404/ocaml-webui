@@ -1,36 +1,40 @@
 module Webview = struct
-  type t
+  let fail_error error = failwith (Webui_raw.Error.to_string error)
+  let require = function Ok value -> value | Error error -> fail_error error
+  let create debug = require (Webui_raw.Window.create { debug })
+  let destroy window = require (Webui_raw.Window.destroy window)
+  let run window = require (Webui_raw.Window.run window)
+  let set_title window title = require (Webui_raw.Window.set_title window title)
 
-  external create : bool -> t = "ocaml_webview_create"
-  external destroy : t -> unit = "ocaml_webview_destroy"
-  external run : t -> unit = "ocaml_webview_run"
-  external set_title : t -> string -> unit = "ocaml_webview_set_title"
+  let set_size window width height _hint =
+    require (Webui_raw.Window.set_size window ~width ~height Initial)
 
-  external set_size : t -> int -> int -> int -> unit
-    = "ocaml_webview_set_size"
+  let set_html window html = require (Webui_raw.Window.set_html window html)
 
-  external set_html : t -> string -> unit = "ocaml_webview_set_html"
+  let bind window name handler =
+    ignore
+      (require
+         (Webui_raw.Binding.create window ~name (fun call ->
+              handler call (Webui_raw.Call.request_json call))))
 
-  external bind : t -> string -> (string -> string -> unit) -> unit
-    = "ocaml_webview_bind"
+  let dispatch window callback =
+    require (Webui_raw.Window.dispatch window (fun () -> callback window))
 
-  external dispatch : t -> (t -> unit) -> unit = "ocaml_webview_dispatch"
+  let return _window call status payload =
+    let submission =
+      if status = 0 then Webui_raw.Call.resolve_json call payload
+      else Webui_raw.Call.reject_json call payload
+    in
+    match submission with
+    | `Queued | `Already_completed -> ()
+    | `Window_closing -> failwith "response rejected while Window is closing"
+    | `Enqueue_failed error -> fail_error error
 
-  external return : t -> string -> int -> string -> unit
-    = "ocaml_webview_return"
-
-  external get_window : t -> nativeint = "ocaml_webview_get_window"
-
-  external debug_binding_root_count : unit -> int
-    = "ocaml_webview_debug_binding_root_count"
-
-  external debug_dispatch_root_count : unit -> int
-    = "ocaml_webview_debug_dispatch_root_count"
+  let post_window_close = Webui_raw.For_testing.Win32.post_wm_close
+  let diagnostics = Webui_raw.Diagnostics.snapshot
 end
 
-external current_thread_id : unit -> int = "ocaml_current_thread_id"
-external post_window_close : nativeint -> bool = "ocaml_post_window_close"
-
+let current_thread_id = Webui_raw.For_testing.Win32.current_thread_id
 type lifecycle = Running | Closing | Destroyed
 
 let string_of_lifecycle = function
@@ -54,10 +58,10 @@ let log event fields =
         "{\"at_ms\":%.3f,\"event\":\"%s\",\"thread_id\":%d%s}\n%!"
         (elapsed_ms ()) event (current_thread_id ()) fields)
 
-let root_fields () =
+let root_fields webview =
+  let snapshot = Webview.diagnostics webview in
   Printf.sprintf ",\"binding_roots\":%d,\"dispatch_roots\":%d"
-    (Webview.debug_binding_root_count ())
-    (Webview.debug_dispatch_root_count ())
+    snapshot.binding_roots snapshot.dispatch_roots
 
 let html =
   {html|<!doctype html>
@@ -117,10 +121,7 @@ let start_pending_work webview call_id =
     log "probe.duplicate_start" ""
   else (
     let responder_claimed = Atomic.make false in
-    let window_handle = Webview.get_window webview in
-    log "probe.started"
-      (Printf.sprintf ",\"window_handle\":%S%s"
-         (Nativeint.to_string window_handle) (root_fields ()));
+    log "probe.started" (root_fields webview);
 
     let domain =
       Domain.spawn (fun () ->
@@ -146,7 +147,7 @@ let start_pending_work webview call_id =
                 Atomic.set work_cancelled true;
                 log "response.cancelled"
                   (Printf.sprintf ",\"lifecycle\":%S%s"
-                     (string_of_lifecycle state) (root_fields ()))))
+                     (string_of_lifecycle state) (root_fields webview))))
     in
     domain_handle := Some domain;
 
@@ -155,9 +156,11 @@ let start_pending_work webview call_id =
         (fun () ->
           Unix.sleepf 0.5;
           log "window.close.requested" "";
-          let posted = post_window_close window_handle in
-          log "window.close.posted"
-            (Printf.sprintf ",\"posted\":%s" (string_of_bool posted)))
+          match Webview.post_window_close webview with
+          | Ok () -> log "window.close.posted" ",\"posted\":true"
+          | Error error ->
+              log "window.close.posted" ",\"posted\":false";
+              failwith (Webui_raw.Error.to_string error))
         ()
     in
     close_thread := Some closer)
@@ -168,7 +171,7 @@ let run () =
   Fun.protect
     ~finally:(fun () ->
       if not !destroyed then (
-        log "webview.destroy.fallback" (root_fields ());
+        log "webview.destroy.fallback" (root_fields webview);
         Webview.destroy webview))
     (fun () ->
       Webview.set_title webview "OCaml WebView Phase 1 Pending Close Probe";
@@ -181,10 +184,10 @@ let run () =
             (Printf.sprintf ",\"duration_ms\":%.3f"
                ((Unix.gettimeofday () -. callback_start) *. 1_000.)));
       Webview.set_html webview html;
-      log "ffi.roots.before_run" (root_fields ());
+      log "ffi.roots.before_run" (root_fields webview);
       log "webview.run" "";
       Webview.run webview;
-      log "webview.run.returned" (root_fields ());
+      log "webview.run.returned" (root_fields webview);
 
       let transitioned = Atomic.compare_and_set lifecycle Running Closing in
       log "lifecycle.closing"
@@ -193,23 +196,23 @@ let run () =
       Option.iter Thread.join !close_thread;
       log "window.close.thread_joined" "";
       Option.iter Domain.join !domain_handle;
-      log "domain.joined" (root_fields ());
+      log "domain.joined" (root_fields webview);
 
       if not (Atomic.get work_started) then failwith "long task never started";
       if not (Atomic.get work_cancelled) then
         failwith "pending response was not cancelled";
-      if Webview.debug_dispatch_root_count () <> 0 then
+      if (Webview.diagnostics webview).dispatch_roots <> 0 then
         failwith "dispatch roots remain before destroy";
 
-      log "webview.destroy.start" (root_fields ());
+      log "webview.destroy.start" (root_fields webview);
       Webview.destroy webview;
       destroyed := true;
       Atomic.set lifecycle Destroyed;
-      log "webview.destroy.completed" (root_fields ());
+      log "webview.destroy.completed" (root_fields webview);
 
-      if Webview.debug_binding_root_count () <> 0 then
+      if (Webview.diagnostics webview).binding_roots <> 0 then
         failwith "binding roots remain after destroy";
-      if Webview.debug_dispatch_root_count () <> 0 then
+      if (Webview.diagnostics webview).dispatch_roots <> 0 then
         failwith "dispatch roots remain after destroy";
       log "probe.passed" "")
 
@@ -220,4 +223,3 @@ let () =
     Printf.eprintf "fatal: %s\n%s\n%!" (Printexc.to_string exn)
       (Printexc.get_backtrace ());
     exit 1
-

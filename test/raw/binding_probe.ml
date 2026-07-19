@@ -166,7 +166,7 @@ window.echo({value: 7})
   | Some request -> failwith ("unexpected report request: " ^ request)
   | None -> failwith "report binding was not called");
   (match Atomic.get echo_first with
-  | Some `Sent -> ()
+  | Some `Queued -> ()
   | _ -> failwith "first echo response was not accepted");
   (match Atomic.get echo_second with
   | Some `Already_completed -> ()
@@ -175,7 +175,14 @@ window.echo({value: 7})
   | Some `Already_completed -> ()
   | _ -> failwith "slow response was not cancelled during close");
   (match Atomic.get fault_completion with
-  | Some `Window_closing -> ()
+  | Some
+      (`Enqueue_failed
+        {
+          operation = Webui_raw.Error.Dispatch;
+          code = Webui_raw.Error.Unspecified;
+          _;
+        }) ->
+      ()
   | _ -> failwith "dispatch enqueue failure did not roll back the Call");
 
   let before_destroy = Webui_raw.Diagnostics.snapshot window in

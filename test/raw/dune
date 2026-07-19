@@ -29,3 +29,11 @@
 (executable
  (name abnormal_cleanup_probe)
  (libraries unix threads ocaml-webui.raw))
+
+(executable
+ (name native_close_probe)
+ (libraries unix threads ocaml-webui.raw))
+
+(executable
+ (name resource_safety_probe)
+ (libraries unix threads ocaml-webui.raw))
