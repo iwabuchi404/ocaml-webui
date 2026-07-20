@@ -155,11 +155,10 @@ multi-Window 10 cycle、pending Call 10 cycle/480 Callが完走した。100 clos
 
 ## 次の実装
 
-1. 非WSL UbuntuのGUI環境で同じcompile/runtime gateを通す。
-2. Linuxのsingle-live-Window制約を初期サポート契約として受け入れるか確認し、
-   Windows/Linux共通の公開`.mli`をfreezeする。
-3. CIにWindows compile/testとLinux compile/state-machine gateを追加する。
-4. その後にmacOS compile/runtime検証を加え、上位の手書きbridge baselineへ進む。
+1. 手書きbridge baselineと将来のATD版で比較する定型コード量・変更箇所を記録する。
+2. ATD schemaで同じ `text.analyze` Commandを表現し、OCaml/TypeScript生成物を比較する。
+3. Linux/macOS実機が用意できた時点でraw runtime gateを再開する。
+4. CIにWindows compile/testとLinux compile/state-machine/bridge contract gateを追加する。
 
 ## 追記: Linux portability着手（2026-07-19）
 
@@ -242,3 +241,42 @@ multi-Window 3 cycle / 6 Window / 240 dispatchを再実行し、すべて成功�
 - WSLgではないUbuntu実機またはVMで、同一gateとGUI native closeを再検証する
 - Linux single-live-Windowを初期公開制約としてfreezeするか判断する
 - WSLgのEGL warningをCI失敗条件に含めず、GTK criticalを失敗条件にするログ基準を整備する
+
+## 追記: Phase 2 手書きbridge baseline完了（2026-07-20）
+
+実機待ちと独立して進められるロードマップ手順2として、意図的に手書きの
+`Webui_bridge_baseline`と `text.analyze` mini-appを実装した。これは完成版APIではなく、
+次段のATD生成版が削減すべき定型実装を測る比較対象である。
+
+### 実装範囲
+
+- native bindingを `__ocaml_webui_invoke` 1本へ集約
+- Protocol v1 envelopeをYojsonで手動decode/encode
+- `requestId`、`traceId`、Command名をsuccess/errorへ伝播
+- structured error: code、message、retryable、category、optional details
+- `Responder`でraw `Call.t`を隠し、success/error envelopeを統一
+- unknown Command、validation error、handler例外のsanitized `internal_error`
+- 手書きJavaScript client `globalThis.ocamlWebui.invoke`
+- async handlerは標準Domainを直接spawnし、applicationが明示join
+- Window close時のpending Call cancelとlate response拒否はraw層へ委譲
+
+### contract/E2E結果
+
+- pure protocol test成功
+  - valid request、malformed JSON、protocol mismatch、必須field欠落
+  - success/errorのrequest ID・trace ID伝播
+- Windows/WebView2とWSL2/WSLgの両方で自動E2E成功
+  - `text.analyze` success
+  - validation error
+  - unknown Command
+  - handler例外をnative logへ残しWebViewへはsanitized error
+  - duplicate responseを `Already_completed`で拒否
+  - pending中close後のlate responseを `Already_completed`で拒否
+  - destroy後pending Call / binding root / dispatch root 0
+- Linuxでは2つの検証Windowを順次create/destroyし、single-live-Window契約を維持
+
+### 現在地
+
+ロードマップ手順2は実装・両環境検証まで完了した。次はこの手書き版の変更箇所と
+boilerplateを基準値として記録し、ロードマップ手順3のATD（atdgen + atdts）で同じ
+CommandをSSOT化する。Eio/Lwt、Capability、Worker、full Traceは引き続き対象外とする。

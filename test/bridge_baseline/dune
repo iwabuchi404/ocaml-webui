@@ -1,0 +1,3 @@
+(test
+ (name protocol_test)
+ (libraries ocaml-webui.bridge-baseline yojson))

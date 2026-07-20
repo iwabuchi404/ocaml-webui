@@ -1,0 +1,4 @@
+(library
+ (name webui_bridge_baseline)
+ (public_name ocaml-webui.bridge-baseline)
+ (libraries ocaml-webui.raw yojson))
