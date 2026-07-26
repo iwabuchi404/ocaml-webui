@@ -1,0 +1,15 @@
+{
+  "name": "ocaml-webui-atd-codec-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "opam exec -- dune build --root ../.. @phase3_ts_check",
+    "test": "opam exec -- dune build --root ../.. @phase3_ts_test",
+    "bundle": "opam exec -- dune build --root ../.. @phase3_ts_check @phase3_ts_test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "esbuild": "0.28.1",
+    "typescript": "7.0.2"
+  }
+}

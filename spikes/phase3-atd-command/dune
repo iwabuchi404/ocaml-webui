@@ -1,0 +1,45 @@
+(executable
+ (name main)
+ (modules main bundle_embed)
+ (libraries unix threads yojson ocaml-webui.raw ocaml-webui.command-schema
+   ocaml-webui.bridge-atd))
+
+;; Copy generated TS from command_schema library
+(rule
+ (targets text_analyze.ts)
+ (deps ../../lib/command_schema/text_analyze.ts)
+ (action (copy ../../lib/command_schema/text_analyze.ts text_analyze.ts)))
+
+;; Copy handwritten TS client and probe from web directory
+(rule
+ (targets client.ts)
+ (deps ../../web/phase3-atd-command/client.ts)
+ (action (copy ../../web/phase3-atd-command/client.ts client.ts)))
+
+(rule
+ (targets probe.ts)
+ (deps ../../web/phase3-atd-command/probe.ts)
+ (action (copy ../../web/phase3-atd-command/probe.ts probe.ts)))
+
+;; Bundle probe.ts into an IIFE for WebView embedding.
+;; Uses a cross-platform JS wrapper that calls esbuild's JavaScript API
+;; instead of the platform-specific esbuild binary directly.
+;; Requires: npm ci in web/phase3-atd-command/
+(rule
+ (targets probe.bundle.js)
+ (deps text_analyze.ts client.ts probe.ts
+   ../../web/phase3-atd-command/esbuild-wrapper.mjs
+   ../../web/phase3-atd-command/package.json
+   ../../web/phase3-atd-command/package-lock.json
+   (source_tree ../../web/phase3-atd-command/node_modules))
+ (action
+  (run node ../../web/phase3-atd-command/esbuild-wrapper.mjs
+   probe.ts probe.bundle.js)))
+
+;; Embed the bundle as an OCaml string literal so main.exe depends on it
+;; via Dune's dependency tracking. No runtime file reading needed.
+(rule
+ (targets bundle_embed.ml)
+ (deps probe.bundle.js gen_bundle_embed.ml)
+ (action
+  (run ocaml gen_bundle_embed.ml probe.bundle.js bundle_embed.ml)))

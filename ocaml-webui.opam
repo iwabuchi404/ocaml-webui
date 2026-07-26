@@ -10,6 +10,9 @@ depends: [
   "ocaml" {>= "5.4" & < "5.5"}
   "dune" {>= "3.18"}
   "yojson" {>= "3.0"}
+  "atd" {>= "4.2"}
+  "atdml" {>= "4.2"}
+  "atdts" {>= "4.2"}
   "conf-c++"
   "conf-mingw-w64-g++-x86_64" {os = "win32" & arch = "x86_64"}
 ]

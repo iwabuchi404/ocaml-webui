@@ -1,0 +1,5 @@
+(test
+ (name ocaml_codec_test)
+ (libraries ocaml-webui.command-schema yojson)
+ (deps
+  (source_tree fixtures)))

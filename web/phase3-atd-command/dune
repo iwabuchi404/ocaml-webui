@@ -1,0 +1,38 @@
+;; Copy generated TS into this build directory.
+;; The file stays in _build — it is NOT promoted to the source tree.
+(rule
+ (targets text_analyze.ts)
+ (deps ../../lib/command_schema/text_analyze.ts)
+ (action (copy ../../lib/command_schema/text_analyze.ts text_analyze.ts)))
+
+;; TypeScript typecheck alias — runs tsc in the build directory where
+;; generated text_analyze.ts is available alongside handwritten sources.
+;; Source files listed as deps are auto-copied by Dune into _build.
+;; Requires: npm ci in web/phase3-atd-command/
+(rule
+ (alias phase3_ts_check)
+ (targets .ts_check.stamp)
+ (deps text_analyze.ts
+   client.ts probe.ts ts_codec_test.ts type_contract_test.ts
+   tsconfig.json
+   (source_tree node_modules))
+ (action
+  (progn
+   (run node node_modules/typescript/bin/tsc --strict --noEmit
+    --project .)
+   (write-file .ts_check.stamp ""))))
+
+;; TypeScript runtime test alias — bundles ts_codec_test.ts and runs it.
+;; Requires: npm ci in web/phase3-atd-command/
+(rule
+ (alias phase3_ts_test)
+ (targets .ts_test.stamp)
+ (deps text_analyze.ts
+   client.ts ts_codec_test.ts esbuild-wrapper.mjs
+   tsconfig.json
+   (source_tree node_modules))
+ (action
+  (progn
+   (run node esbuild-wrapper.mjs ts_codec_test.ts ts_codec_test.mjs esm node)
+   (run node ts_codec_test.mjs)
+   (write-file .ts_test.stamp ""))))

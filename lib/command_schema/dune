@@ -1,0 +1,15 @@
+(rule
+ (targets text_analyze.ml text_analyze.mli)
+ (deps text_analyze.atd)
+ (action (run atdml text_analyze.atd)))
+
+(rule
+ (target text_analyze.ts)
+ (deps text_analyze.atd)
+ (action (run atdts %{deps})))
+
+(library
+ (name command_schema)
+ (public_name ocaml-webui.command-schema)
+ (libraries yojson)
+ (modules text_analyze))

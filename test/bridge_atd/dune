@@ -1,0 +1,8 @@
+(test
+ (name protocol_test)
+ (libraries ocaml-webui.raw ocaml-webui.bridge-atd yojson))
+
+(test
+ (name wire_parity_test)
+ (libraries ocaml-webui.bridge-baseline ocaml-webui.bridge-atd
+   ocaml-webui.command-schema yojson))

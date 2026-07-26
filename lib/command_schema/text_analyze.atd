@@ -1,0 +1,24 @@
+type text_analyze_request = {
+  text: string;
+  delay_ms <json name="delayMs">: int;
+}
+
+type text_analyze_result = {
+  bytes: int;
+  words: int;
+  observed_trace_id <json name="observedTraceId">: string;
+}
+
+type text_analyze_error_code = [
+  | Empty_text <json name="empty_text">
+  | Invalid_delay <json name="invalid_delay">
+  | Invalid_text <json name="invalid_text">
+  | Invalid_payload <json name="invalid_payload">
+]
+
+type text_analyze_error = {
+  code: text_analyze_error_code;
+  message: string;
+  retryable: bool;
+  category: string;
+}
