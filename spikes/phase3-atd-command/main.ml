@@ -1,5 +1,6 @@
 module Bridge = Webui_bridge_atd
 module Schema = Command_schema.Text_analyze
+module EchoSchema = Command_schema.Echo
 
 let fail_error error = failwith (Webui_raw.Error.to_string error)
 let require = function Ok value -> value | Error error -> fail_error error
@@ -24,6 +25,12 @@ let text_analyze_codec =
     ~input_of_yojson:Schema.text_analyze_request_of_yojson
     ~output_to_yojson:Schema.yojson_of_text_analyze_result
     ~error_to_yojson:Schema.yojson_of_text_analyze_error
+
+let echo_codec =
+  Bridge.make_codec
+    ~input_of_yojson:EchoSchema.echo_request_of_yojson
+    ~output_to_yojson:EchoSchema.yojson_of_echo_result
+    ~error_to_yojson:EchoSchema.yojson_of_echo_error
 
 type phase = {
   window : Webui_raw.Window.t;
@@ -109,6 +116,44 @@ let analyze_command phase =
         end
       end)
 
+let max_echo_length = 1000
+
+let echo_command phase =
+  Bridge.define echo_codec ~name:"echo"
+    (fun context request responder ->
+      if context.request_id = "request-echo-handler-error" then
+        failwith "intentional echo handler failure"
+      else begin
+        Atomic.set phase.handler_started true;
+        let response =
+          if String.length request.message = 0 then
+            Bridge.responder_reject responder
+              (EchoSchema.
+                { code = Empty_message;
+                  message = "message must not be empty";
+                  retryable = false;
+                  category = "validation"
+                })
+          else if String.length request.message > max_echo_length then
+            Bridge.responder_reject responder
+              (EchoSchema.
+                { code = Too_long;
+                  message =
+                    Printf.sprintf "message length %d exceeds limit %d"
+                      (String.length request.message) max_echo_length;
+                  retryable = false;
+                  category = "validation"
+                })
+          else
+            Bridge.responder_resolve responder
+              (EchoSchema.
+                { echoed = request.message;
+                  length = String.length request.message
+                })
+        in
+        Atomic.set phase.first_submission (Some response)
+      end)
+
 let wait_until label predicate =
   let deadline = Unix.gettimeofday () +. 5.0 in
   while (not (predicate ())) && Unix.gettimeofday () < deadline do
@@ -147,7 +192,10 @@ let run_success_phase () =
   let bridge =
     match
       Bridge.install phase.window
-        ~commands:[ Bridge.pack (analyze_command phase) ]
+        ~commands:[
+          Bridge.pack (analyze_command phase);
+          Bridge.pack (echo_command phase);
+        ]
     with
     | Ok bridge -> bridge
     | Error (Bridge.Duplicate_command name) ->
@@ -251,7 +299,7 @@ let () =
     run_success_phase ();
     run_cancel_phase ();
     Printf.printf
-      "atd_bridge: passed success validation unknown handler_error duplicate cancel malformed roots=0\n%!"
+      "atd_bridge: passed success validation unknown handler_error duplicate cancel malformed echo roots=0\n%!"
   with exn ->
     Printf.eprintf "atd_bridge: failed: %s\n%s\n%!"
       (Printexc.to_string exn) (Printexc.get_backtrace ());

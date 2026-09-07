@@ -6,6 +6,14 @@ import {
   readTextAnalyzeResult,
   readTextAnalyzeError,
 } from "./text_analyze.js";
+import {
+  EchoRequest,
+  EchoResult,
+  EchoError,
+  writeEchoRequest,
+  readEchoResult,
+  readEchoError,
+} from "./echo.js";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -141,6 +149,15 @@ export const textAnalyze: CommandDescriptor<TextAnalyzeRequest, TextAnalyzeResul
     writeTextAnalyzeRequest,
     readTextAnalyzeResult,
     readTextAnalyzeError,
+  );
+
+/** The echo command descriptor. */
+export const echo: CommandDescriptor<EchoRequest, EchoResult, EchoError> =
+  defineCommand(
+    "echo",
+    writeEchoRequest,
+    readEchoResult,
+    readEchoError,
   );
 
 let sequence = 0;

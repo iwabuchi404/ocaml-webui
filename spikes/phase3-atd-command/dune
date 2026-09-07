@@ -10,6 +10,11 @@
  (deps ../../lib/command_schema/text_analyze.ts)
  (action (copy ../../lib/command_schema/text_analyze.ts text_analyze.ts)))
 
+(rule
+ (targets echo.ts)
+ (deps ../../lib/command_schema/echo.ts)
+ (action (copy ../../lib/command_schema/echo.ts echo.ts)))
+
 ;; Copy handwritten TS client and probe from web directory
 (rule
  (targets client.ts)
@@ -27,7 +32,7 @@
 ;; Requires: npm ci in web/phase3-atd-command/
 (rule
  (targets probe.bundle.js)
- (deps text_analyze.ts client.ts probe.ts
+ (deps text_analyze.ts echo.ts client.ts probe.ts
    ../../web/phase3-atd-command/esbuild-wrapper.mjs
    ../../web/phase3-atd-command/package.json
    ../../web/phase3-atd-command/package-lock.json

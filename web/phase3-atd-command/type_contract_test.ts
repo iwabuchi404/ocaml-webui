@@ -1,6 +1,8 @@
-import { textAnalyze, invokeCommand, defineCommand, ApplicationError, ProtocolError } from "./client.js";
+import { textAnalyze, echo, invokeCommand, defineCommand, ApplicationError, ProtocolError } from "./client.js";
 import type { TextAnalyzeRequest, TextAnalyzeResult, TextAnalyzeError, TextAnalyzeErrorCode } from "./text_analyze.js";
 import { writeTextAnalyzeRequest, readTextAnalyzeResult, readTextAnalyzeError } from "./text_analyze.js";
+import type { EchoRequest, EchoResult, EchoError } from "./echo.js";
+import { writeEchoRequest, readEchoResult, readEchoError } from "./echo.js";
 
 // This file verifies that the TypeScript type system catches wrong inputs
 // at compile time. It uses @ts-expect-error to assert that incorrect usage
@@ -72,6 +74,52 @@ const _badDescriptor = defineCommand<TextAnalyzeRequest, TextAnalyzeResult, Text
 // readTextAnalyzeResult returns TextAnalyzeResult, assigning to wrong type should not compile
 // @ts-expect-error: TextAnalyzeResult is not a string
 const _badResult: string = readTextAnalyzeResult({ bytes: 1, words: 2, observedTraceId: "x" });
+
+// --- echo type contracts ---
+
+// Correct echo usage compiles
+const _echoValid: Promise<EchoResult> = invokeCommand(
+  echo,
+  { message: "hello" },
+);
+
+// Wrong echo field — should not compile
+// @ts-expect-error: 'msg' is not a field of EchoRequest
+const _echoWrongField: EchoRequest = { msg: "hi" };
+
+// Wrong echo message type — should not compile
+// @ts-expect-error: message must be string, not number
+const _echoWrongType: EchoRequest = { message: 123 };
+
+// Missing echo message — should not compile
+// @ts-expect-error: message is required
+const _echoMissing: EchoRequest = {};
+
+// Extra echo field — should not compile in strict mode
+// @ts-expect-error: 'extra' is not a known field
+const _echoExtra: EchoRequest = { message: "hi", extra: "no" };
+
+// Wrong input to writeEchoRequest
+// @ts-expect-error: number is not EchoRequest
+const _echoBadInput = writeEchoRequest(42);
+
+// echo ApplicationError carries typed error
+async function _checkEchoAppError(): Promise<void> {
+  try {
+    await invokeCommand(echo, { message: "" });
+  } catch (e) {
+    if (e instanceof ApplicationError) {
+      const _err: EchoError = e.typedError;
+      const _kind: string = _err.code.kind;
+      // @ts-expect-error: 'Unknown' is not assignable to the variant union
+      const _badKind: "Unknown" = _err.code.kind;
+    }
+  }
+}
+
+// readEchoResult returns EchoResult, assigning to wrong type should not compile
+// @ts-expect-error: EchoResult is not a number
+const _badEchoResult: number = readEchoResult({ echoed: "hi", length: 2 });
 
 // Export to ensure the file is not tree-shaken
 export {};

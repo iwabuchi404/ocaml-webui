@@ -3,3 +3,9 @@
  (libraries ocaml-webui.command-schema yojson)
  (deps
   (source_tree fixtures)))
+
+(test
+ (name echo_codec_test)
+ (libraries ocaml-webui.command-schema yojson)
+ (deps
+  (source_tree fixtures)))

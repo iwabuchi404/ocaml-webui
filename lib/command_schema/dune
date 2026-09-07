@@ -8,8 +8,18 @@
  (deps text_analyze.atd)
  (action (run atdts %{deps})))
 
+(rule
+ (targets echo.ml echo.mli)
+ (deps echo.atd)
+ (action (run atdml echo.atd)))
+
+(rule
+ (target echo.ts)
+ (deps echo.atd)
+ (action (run atdts %{deps})))
+
 (library
  (name command_schema)
  (public_name ocaml-webui.command-schema)
  (libraries yojson)
- (modules text_analyze))
+ (modules text_analyze echo))

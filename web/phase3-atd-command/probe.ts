@@ -1,5 +1,6 @@
-import { textAnalyze, invokeCommand, ApplicationError } from "./client.js";
+import { textAnalyze, echo, invokeCommand, ApplicationError } from "./client.js";
 import type { TextAnalyzeRequest, TextAnalyzeResult, TextAnalyzeError } from "./text_analyze.js";
+import type { EchoRequest, EchoResult, EchoError } from "./echo.js";
 
 /** Probe application: uses the typed client to invoke text.analyze. */
 export async function runProbe(): Promise<void> {
@@ -110,6 +111,48 @@ export async function runProbe(): Promise<void> {
     assert(e?.requestId === "request-handler-exit", `exit requestId: ${e?.requestId}`);
     assert(e?.error?.code === "internal_error", `exit code: ${e?.error?.code}`);
     assert(e?.error?.message === "command handler raised", `exit message: ${e?.error?.message}`);
+  }
+
+  // --- echo command ---
+
+  // echo success
+  const echoResult = await invokeCommand(
+    echo,
+    { message: "hello echo" },
+    { requestId: "request-echo-success", traceId: "trace-echo-success" },
+  );
+  assert(echoResult.echoed === "hello echo", `echo.echoed: ${echoResult.echoed}`);
+  assert(echoResult.length === 10, `echo.length: ${echoResult.length}`);
+
+  // echo empty_message validation error
+  try {
+    await invokeCommand(
+      echo,
+      { message: "" },
+      { requestId: "request-echo-empty", traceId: "trace-echo-empty" },
+    );
+    throw new Error("echo empty unexpectedly resolved");
+  } catch (e) {
+    assert(e instanceof ApplicationError, `echo empty: expected ApplicationError, got ${e}`);
+    const appErr = e as ApplicationError<EchoError>;
+    assert(appErr.requestId === "request-echo-empty", `echo empty requestId: ${appErr.requestId}`);
+    assert(appErr.typedError.code.kind === "Empty_message", `echo empty code: ${appErr.typedError.code.kind}`);
+    assert(appErr.typedError.category === "validation", `echo empty category: ${appErr.typedError.category}`);
+  }
+
+  // echo too_long validation error
+  try {
+    await invokeCommand(
+      echo,
+      { message: "x".repeat(1001) },
+      { requestId: "request-echo-too-long", traceId: "trace-echo-too-long" },
+    );
+    throw new Error("echo too_long unexpectedly resolved");
+  } catch (e) {
+    assert(e instanceof ApplicationError, `echo too_long: expected ApplicationError, got ${e}`);
+    const appErr = e as ApplicationError<EchoError>;
+    assert(appErr.requestId === "request-echo-too-long", `echo too_long requestId: ${appErr.requestId}`);
+    assert(appErr.typedError.code.kind === "Too_long", `echo too_long code: ${appErr.typedError.code.kind}`);
   }
 
   await (globalThis as any).__baseline_report("pass");

@@ -1,0 +1,20 @@
+type echo_request = {
+  message: string;
+}
+
+type echo_result = {
+  echoed: string;
+  length: int;
+}
+
+type echo_error_code = [
+  | Empty_message <json name="empty_message">
+  | Too_long <json name="too_long">
+]
+
+type echo_error = {
+  code: echo_error_code;
+  message: string;
+  retryable: bool;
+  category: string;
+}

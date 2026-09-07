@@ -5,6 +5,11 @@
  (deps ../../lib/command_schema/text_analyze.ts)
  (action (copy ../../lib/command_schema/text_analyze.ts text_analyze.ts)))
 
+(rule
+ (targets echo.ts)
+ (deps ../../lib/command_schema/echo.ts)
+ (action (copy ../../lib/command_schema/echo.ts echo.ts)))
+
 ;; TypeScript typecheck alias — runs tsc in the build directory where
 ;; generated text_analyze.ts is available alongside handwritten sources.
 ;; Source files listed as deps are auto-copied by Dune into _build.
@@ -12,7 +17,7 @@
 (rule
  (alias phase3_ts_check)
  (targets .ts_check.stamp)
- (deps text_analyze.ts
+ (deps text_analyze.ts echo.ts
    client.ts probe.ts ts_codec_test.ts type_contract_test.ts
    tsconfig.json
    (source_tree node_modules))
@@ -27,7 +32,7 @@
 (rule
  (alias phase3_ts_test)
  (targets .ts_test.stamp)
- (deps text_analyze.ts
+ (deps text_analyze.ts echo.ts
    client.ts ts_codec_test.ts esbuild-wrapper.mjs
    tsconfig.json
    (source_tree node_modules))

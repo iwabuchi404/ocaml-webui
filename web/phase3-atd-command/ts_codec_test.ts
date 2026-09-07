@@ -12,6 +12,20 @@ import {
   readTextAnalyzeErrorCode,
   writeTextAnalyzeErrorCode,
 } from "./text_analyze.js";
+import {
+  EchoRequest,
+  EchoResult,
+  EchoError,
+  EchoErrorCode,
+  readEchoRequest,
+  writeEchoRequest,
+  readEchoResult,
+  writeEchoResult,
+  readEchoError,
+  writeEchoError,
+  readEchoErrorCode,
+  writeEchoErrorCode,
+} from "./echo.js";
 
 let failures = 0;
 
@@ -101,6 +115,60 @@ expectThrow(() => readTextAnalyzeError(null), "malformed error: null");
 expectThrow(() => readTextAnalyzeError({ code: "unknown", message: "x", retryable: false, category: "x" }), "malformed error: unknown code");
 expectThrow(() => readTextAnalyzeError({ code: "empty_text", message: 123, retryable: false, category: "x" }), "malformed error: wrong message type");
 
+// --- echo codec tests ---
+
+// Round-trip: echo request
+const echoRequestJson = '{"message":"hello echo"}';
+const echoReq = readEchoRequest(JSON.parse(echoRequestJson));
+assert(echoReq.message === "hello echo", "echo request.message");
+const echoReqRewritten = writeEchoRequest(echoReq);
+const echoReqReparsed = readEchoRequest(echoReqRewritten);
+assert(echoReqReparsed.message === echoReq.message, "echo request round-trip message");
+
+// Round-trip: echo result
+const echoResultJson = '{"echoed":"hello echo","length":10}';
+const echoRes = readEchoResult(JSON.parse(echoResultJson));
+assert(echoRes.echoed === "hello echo", "echo result.echoed");
+assert(echoRes.length === 10, "echo result.length");
+const echoResRewritten = writeEchoResult(echoRes);
+const echoResReparsed = readEchoResult(echoResRewritten);
+assert(echoResReparsed.echoed === echoRes.echoed, "echo result round-trip echoed");
+assert(echoResReparsed.length === echoRes.length, "echo result round-trip length");
+
+// Round-trip: echo error
+const echoErrorJson = '{"code":"empty_message","message":"message must not be empty","retryable":false,"category":"validation"}';
+const echoErr = readEchoError(JSON.parse(echoErrorJson));
+assert(echoErr.code.kind === "Empty_message", "echo error.code.kind");
+assert(echoErr.message === "message must not be empty", "echo error.message");
+assert(echoErr.retryable === false, "echo error.retryable");
+assert(echoErr.category === "validation", "echo error.category");
+const echoErrRewritten = writeEchoError(echoErr);
+const echoErrReparsed = readEchoError(echoErrRewritten);
+assert(echoErrReparsed.code.kind === "Empty_message", "echo error round-trip code");
+assert(echoErrReparsed.message === echoErr.message, "echo error round-trip message");
+
+// echo variant wire strings
+assert(writeEchoErrorCode({ kind: "Empty_message" }) === "empty_message", "echo variant empty_message wire");
+assert(writeEchoErrorCode({ kind: "Too_long" }) === "too_long", "echo variant too_long wire");
+assert(readEchoErrorCode("empty_message").kind === "Empty_message", "read echo variant empty_message");
+assert(readEchoErrorCode("too_long").kind === "Too_long", "read echo variant too_long");
+
+// echo decode failures
+expectThrow(() => readEchoRequest({}), "echo missing message");
+expectThrow(() => readEchoRequest({ message: 123 }), "echo wrong message type");
+expectThrow(() => readEchoErrorCode("unknown_code"), "echo unknown error code");
+expectThrow(() => readEchoResult({ echoed: "hi" }), "echo missing length");
+
+// echo unknown field tolerance
+const echoExtra = readEchoRequest({ message: "hi", extra: "ignored", more: 42 });
+assert(echoExtra.message === "hi", "echo unknown field tolerance message");
+
+// echo malformed rejection
+expectThrow(() => readEchoResult(null), "echo malformed result: null");
+expectThrow(() => readEchoResult("string"), "echo malformed result: string");
+expectThrow(() => readEchoError(null), "echo malformed error: null");
+expectThrow(() => readEchoError({ code: "unknown", message: "x", retryable: false, category: "x" }), "echo malformed error: unknown code");
+
 // Error classification: protocol error must not be misclassified as application error
 {
   const { textAnalyze, invokeCommand, ProtocolError, ApplicationError } = await import("./client.js");
@@ -174,5 +242,5 @@ if (failures > 0) {
   console.error(`${failures} test(s) failed`);
   process.exit(1);
 } else {
-  console.log("ts_codec_test: passed round-trip decode variant unknown-field malformed error-classification");
+  console.log("ts_codec_test: passed round-trip decode variant unknown-field malformed error-classification echo");
 }

@@ -286,8 +286,82 @@ protocol_test: passed request error response contracts
 2. WSLg/Linux検証が未実施
 3. `atdgen`のstreaming APIが必要な場合は再評価
 
+## 追記: 2つ目のCommand (echo) 追加コスト計測（2026-09-07）
+
+ロードマップ手順3完了後の推奨事項（finalization-plan §9）に従い、2つ目の小さなCommand
+`echo`を追加し、SSOT追加コストとdescriptor重複を再計測した。
+
+### echo Command仕様
+
+- schema: `lib/command_schema/echo.atd`
+- request: `{ message: string }`
+- result: `{ echoed: string; length: int }`
+- error code: `Empty_message | Too_long` (共にcategory=validation)
+- handler: 空文字→Empty_message、1000文字超→Too_long、それ以外→echo back
+
+### 計測結果
+
+#### 触れたファイル（14ファイル: 5新規 + 9修正、net +250行）
+
+| ファイル | 種別 | 変更 |
+|---|---|---:|
+| `lib/command_schema/echo.atd` | 新規・**schema** | 17行 |
+| `test/command_schema/echo_codec_test.ml` | 新規・test | 90行 |
+| `test/command_schema/fixtures/echo-*.json` ×3 | 新規・test | 3行 |
+| `lib/command_schema/dune` | 修正・build | +11/-1 |
+| `spikes/phase3-atd-command/dune` | 修正・build | +6/-1 |
+| `spikes/phase3-atd-command/main.ml` | 修正・**handler** | +50/-2 |
+| `test/command_schema/dune` | 修正・build | +6/0 |
+| `web/phase3-atd-command/client.ts` | 修正・**descriptor** | +17/0 |
+| `web/phase3-atd-command/dune` | 修正・build | +7/-2 |
+| `web/phase3-atd-command/probe.ts` | 修正・test | +44/-1 |
+| `web/phase3-atd-command/ts_codec_test.ts` | 修正・test | +69/-1 |
+| `web/phase3-atd-command/type_contract_test.ts` | 修正・test | +49/-1 |
+
+生成物（`echo.ml/mli`, `echo.ts`）は自動生成・手作業ゼロ。
+
+#### 必須同期箇所 = 3（decision文書の主張を確認）
+
+1. **schema** (`echo.atd`): payload形状定義
+2. **descriptor** (`client.ts`): Command名 ↔ codec 関連付け
+3. **handler** (`main.ml`): ビジネスロジック
+
+上記3箇所だけでCommand機能が成立。残りはbuild wiring（3 duneファイル）とtest（4ファイル+3 fixture）。
+
+#### Command名出現箇所の比較
+
+| Command | 文字列出現数 | 内訳 |
+|---|---:|---|
+| `text.analyze` | 16 | handler定義2 + test fixture 5 + descriptor 2 + probe raw invoke 4 + ts_codec mock 3 |
+| `echo` | **2** | handler定義1 + descriptor 1 |
+
+echoが2箇所なのは、probeがtyped descriptor参照（`echo`）を使い、raw `__ocaml_webui_invoke`の
+error test caseがないため。text.analyzeの16箇所のうち、probe.tsの3 raw invokeとts_codec_test.tsの
+3 mockは`textAnalyze.name`で置換可能 → 最大10箇所へ削減可能。
+
+### 結論
+
+1. **SSOT追加コスト = 3箇所（schema + descriptor + handler）** — decision文書の主張を確認。
+   ATD標準で十分、独自generator不要の方針を維持。
+2. **descriptor重複は1箇所へ集約可能** — `descriptor.name`参照で文字列リテラルを置換すれば、
+   Command名出現箇所をhandler定義1 + descriptor定義1の2箇所へ集約できる。
+3. **dune wiring 3ファイル**が残存コストだが、これはDuneのmodule明示指定によるもので、
+   ATDではなくbuild system側の制約。
+4. **testコードが全行数の80%**だが、これは検証投資であり同期コストではない。
+
+### Gate通過状況（echo追加後・Windows）
+
+- `dune build @phase3_ts_check` / `@phase3_ts_test`: 成功
+- `dune build @all`: 成功
+- `dune runtest --force`: 6テスト全て成功（`echo_codec_test`追加）
+- `dune build @install`: 成功
+- `dune exec spikes/phase3-atd-command/main.exe`: E2E成功
+- `dune clean` → rebuild: 成功（clean checkout再現性）
+- source tree汚染: なし（generated artifact漏出0）
+
 ## 次のステップ
 
 - Context Mixerのcontext型と改訂ロードマップは、ユーザー確認後に連鎖更新する
-- 追加Command (text.analyze以外) のschema定義
+- ~~追加Command (text.analyze以外) のschema定義~~ → 完了（echo追加・計測済み）
 - WSLg/Linux環境でのGate F検証
+- descriptor重複の集約（`descriptor.name`参照化）— 必要に応じて実施
