@@ -1,0 +1,10 @@
+depexts: [
+  # os-family "debian" covers Debian, Ubuntu and derivatives (Mint, etc.)
+  ["build-essential" "pkg-config" "libgtk-3-dev" "libwebkit2gtk-4.1-dev"]
+    {os-family = "debian"}
+  ["gcc-c++" "make" "pkgconf-pkg-config" "gtk3-devel" "webkit2gtk4.1-devel"]
+    {os-distribution = "fedora"}
+  # os-family "arch" covers Arch and derivatives (Manjaro, etc.)
+  ["base-devel" "pkgconf" "gtk3" "webkit2gtk-4.1"]
+    {os-family = "arch"}
+]

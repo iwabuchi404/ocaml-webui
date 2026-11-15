@@ -57,6 +57,35 @@ Clone with submodules:
 git clone --recurse-submodules <repository-url>
 ```
 
+## Installing with opam (git pin)
+
+ocaml-webui can be consumed as a library via `opam pin`:
+
+```bash
+git clone --recurse-submodules https://github.com/iwabuchi404/ocaml-webui.git
+cd ocaml-webui
+opam switch create . 5.4.1
+opam pin add ocaml-webui .
+opam install ocaml-webui
+```
+
+> **Important:** `opam pin add <pkg> git+https://...` does **not** initialize
+> git submodules. `vendor/webview` (upstream headers required by the C++
+> stubs) is a submodule, so a plain URL pin fails to build. Clone with
+> `--recurse-submodules` and pin the local path instead, as shown above —
+> this is the recommended flow for early adopters.
+
+The package installs the public libraries `ocaml-webui.raw`,
+`ocaml-webui.bridge-baseline`, `ocaml-webui.bridge-atd`, and
+`ocaml-webui.command-schema`. Building also requires node + `npm ci` inside
+`web/phase3-atd-command/` for the bundled TypeScript probes; consumers that
+only build against the libraries do not need node.
+
+Headless tests (codec, protocol, wire-parity, state machine) run via
+`dune runtest` / `opam run-test` without a display. Probes that open real
+WebView windows are excluded from runtest and run manually via `dune exec`
+(see below).
+
 Build every project-owned target:
 
 ```powershell
@@ -76,6 +105,7 @@ opam exec -- dune exec test/raw/pending_call_stress.exe -- --cycles 10 --calls 4
 opam exec -- dune exec test/raw/abnormal_cleanup_probe.exe
 opam exec -- dune exec test/raw/native_close_probe.exe
 opam exec -- dune exec test/raw/resource_safety_probe.exe
+opam exec -- dune exec test/bridge_atd/install_probe.exe
 opam exec -- dune runtest test/bridge_baseline
 ```
 

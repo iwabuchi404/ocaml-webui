@@ -19,12 +19,17 @@ jobs:
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: "5.4"
+          ocaml-compiler: "5.4.1"
           dune-cache: true
 
       - name: Install OCaml dependencies
         shell: bash
         run: opam install . --deps-only --with-test -y
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       # web/phase3-atd-command bundling (used by the phase3 spike)
       # calls esbuild via node.
@@ -34,13 +39,67 @@ jobs:
 
       - name: Build
         shell: bash
-        run: opam exec -- dune build
+        run: opam exec -- dune build @all
 
-      - name: Run tests
+      # dune runtest executes only headless-safe tests (pure codec,
+      # protocol, wire-parity, state machine). Window-requiring probes
+      # are (executable) stanzas excluded from runtest.
+      - name: Run headless tests
         shell: bash
         run: opam exec -- dune runtest
 
-      # Generated TypeScript codec checks (typecheck + runtime test).
       - name: TypeScript codec checks
         shell: bash
         run: opam exec -- dune build @phase3_ts_check @phase3_ts_test
+
+      # ocaml-webui.opam is generated from dune-project; verify the
+      # committed file is up to date and lint-clean.
+      - name: Check generated opam is current
+        shell: bash
+        run: git diff --exit-code -- ocaml-webui.opam
+
+      - name: opam lint
+        shell: bash
+        run: opam lint ocaml-webui.opam
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.4.1"
+          dune-cache: true
+
+      # opam install resolves depexts (GTK 3 / WebKitGTK 4.1 dev
+      # packages) declared in the generated opam file.
+      - name: Install OCaml dependencies
+        run: |
+          sudo apt-get update
+          opam install . --deps-only --with-test -y
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        working-directory: web/phase3-atd-command
+        run: npm ci
+
+      - name: Build
+        run: opam exec -- dune build @all
+
+      - name: Run headless tests
+        run: opam exec -- dune runtest
+
+      - name: TypeScript codec checks
+        run: opam exec -- dune build @phase3_ts_check @phase3_ts_test
+
+      - name: opam lint
+        run: opam lint ocaml-webui.opam

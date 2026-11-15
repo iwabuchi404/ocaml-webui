@@ -79,28 +79,6 @@ let expect_response_identity () =
       | _ -> fail "error field missing")
    | _ -> fail "failure response not an object")
 
-let expect_duplicate_command () =
-  let codec =
-    Bridge.make_codec
-      ~input_of_yojson:(fun _ -> ())
-      ~output_to_yojson:(fun _ -> `Null)
-      ~error_to_yojson:(fun _ -> `Null)
-  in
-  let cmd = Bridge.define codec ~name:"dup" (fun _ _ _ -> ()) in
-  let window =
-    match Webui_raw.Window.create { debug = false } with
-    | Ok w -> w
-    | Error e -> fail ("window create failed: " ^ Webui_raw.Error.to_string e)
-  in
-  (match Bridge.install window ~commands:[Bridge.pack cmd; Bridge.pack cmd] with
-   | Error (Bridge.Duplicate_command "dup") -> ()
-   | Error (Bridge.Duplicate_command name) ->
-     fail ("duplicate name mismatch: " ^ name)
-   | Error (Bridge.Raw_error e) ->
-     fail ("unexpected raw error: " ^ Webui_raw.Error.to_string e)
-   | Ok _ -> fail "duplicate command not detected");
-  ignore (Webui_raw.Window.destroy window)
-
 let expect_application_error_envelope () =
   let context =
     { Bridge.request_id = "req-5"; trace_id = "trace-5"; command = "text.analyze" }
@@ -138,5 +116,4 @@ let () =
   expect_missing_field ();
   expect_response_identity ();
   expect_application_error_envelope ();
-  expect_duplicate_command ();
-  Printf.printf "atd_protocol_test: passed request error response identity app-error duplicate\n%!"
+  Printf.printf "atd_protocol_test: passed request error response identity app-error\n%!"

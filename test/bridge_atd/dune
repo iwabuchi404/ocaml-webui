@@ -6,3 +6,8 @@
  (name wire_parity_test)
  (libraries ocaml-webui.bridge-baseline ocaml-webui.bridge-atd
    ocaml-webui.command-schema yojson))
+
+;; Requires a real WebView window — manual probe, not part of runtest.
+(executable
+ (name install_probe)
+ (libraries ocaml-webui.raw ocaml-webui.bridge-atd))
