@@ -63,6 +63,10 @@ let () =
   let c_flags, library_flags =
     match Sys.os_type with
     | "Win32" ->
+        let gcc_file name =
+          read_command
+            (Printf.sprintf "x86_64-w64-mingw32-gcc -print-file-name=%s" name)
+        in
         ( common_c_flags
           @ [
               "-I";
@@ -71,7 +75,10 @@ let () =
               "../../vendor/webview2-sdk-1.0.1150.38/include";
             ],
           [
-            "-lstdc++";
+            gcc_file "libwinpthread.a";
+            gcc_file "libstdc++.a";
+            gcc_file "libgcc.a";
+            gcc_file "libgcc_eh.a";
             "-ladvapi32";
             "-lole32";
             "-lshell32";
