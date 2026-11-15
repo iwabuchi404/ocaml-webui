@@ -6,6 +6,10 @@ dispatch, typed commands, structured errors, and tracing.
 """
 maintainer: "Hiro"
 authors: "Hiro"
+license: "MIT"
+homepage: "https://github.com/iwabuchi404/ocaml-webui"
+dev-repo: "git+https://github.com/iwabuchi404/ocaml-webui.git"
+bug-reports: "https://github.com/iwabuchi404/ocaml-webui/issues"
 depends: [
   "ocaml" {>= "5.4" & < "5.5"}
   "dune" {>= "3.18"}
@@ -19,4 +23,5 @@ depends: [
 build: [
   ["dune" "subst"] {dev}
   ["dune" "build" "-p" name "-j" jobs]
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]

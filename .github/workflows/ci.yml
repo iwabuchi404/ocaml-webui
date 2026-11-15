@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      # vendor/webview is a git submodule carrying upstream headers
+      # required by the C++ stubs; fetch submodules on checkout.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.4"
+          dune-cache: true
+
+      - name: Install OCaml dependencies
+        shell: bash
+        run: opam install . --deps-only --with-test -y
+
+      # web/phase3-atd-command bundling (used by the phase3 spike)
+      # calls esbuild via node.
+      - name: Install frontend dependencies
+        working-directory: web/phase3-atd-command
+        run: npm ci
+
+      - name: Build
+        shell: bash
+        run: opam exec -- dune build
+
+      - name: Run tests
+        shell: bash
+        run: opam exec -- dune runtest
+
+      # Generated TypeScript codec checks (typecheck + runtime test).
+      - name: TypeScript codec checks
+        shell: bash
+        run: opam exec -- dune build @phase3_ts_check @phase3_ts_test
