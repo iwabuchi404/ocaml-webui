@@ -89,3 +89,43 @@ runtest に含まれない。CI で明示実行。
   - CI 未push コミット: `e3ec7d8`(LICENSE), `e346ff3`(gitignore), `2907a0b`(旧CI+opam), `9c68c7a`(Phase 0)
   - 初回実行リスク: `conf-mingw-w64-g++-x86_64` の runner での解決、Linux depext の apt 解決
 - `install_probe.exe` はビルド確認済みだが、実 Window での実行検証は未実施（Windows 実機で `dune exec` して確認推奨）
+
+---
+
+# CI 実行結果（2026-11-15 追記）
+
+## G0.2 達成: clean checkout CI green
+
+GitHub Actions run `43695072927`（head sha `5326569`）で両ジョブ全ステップ成功。
+
+| job | 結果 |
+|---|---|
+| linux (ubuntu-24.04) | success: setup-ocaml, deps install, npm ci, `dune build @all`, `dune runtest`, `@phase3_ts_check`, `@phase3_ts_test`, `opam lint` |
+| windows (windows-latest) | success: 同上 + `git diff --exit-code -- ocaml-webui.opam`（生成 opam の freshness 検証） |
+
+## 初回 CI で判明した Windows 固有障害と修正
+
+初回実行（run `43688634173`）で Windows `dune runtest` が2件失敗。
+
+### 障害1: fixture 読み取りの End_of_file（根本原因）
+
+- **症状**: `ocaml_codec_test` / `echo_codec_test` が `Fatal error: exception End_of_file`
+- **原因**: `read_fixture` が `open_in`（Windows ではテキストモード）を使用。CRLF→LF 変換で実際に読めるバイト数が `in_channel_length`（ディスク上のバイト数）より減り、`really_input` が `End_of_file` を送出。GitHub Actions Windows runner では autocrlf により fixture が CRLF で checkout されるため発現（ローカルは LF checkout で潜んでいた）
+- **修正**: `open_in_bin` に変更（`5326569`）。バイト忠実な読み取りになり checkout の改行規約に非依存
+- **教訓**: Windows で `in_channel_length` + `really_input` の組み合わせは必ず `open_in_bin` とペアにする
+
+### 修正2（予防的）: MinGW C++ ランタイムの静的リンク
+
+- `webui_raw` stubs をリンクする exe が `libstdc++-6.dll` / `libgcc_s_seh-1.dll` / `libwinpthread-1.dll` を実行時に要求していた（`ldd` で確認）
+- 本障害の直接原因ではなかったが、配布 exe が MinGW DLL に依存する問題を解消: `discover.ml` で `gcc -print-file-name` により静的アーカイブの絶対パスを解決し、flexlink の位置引数として渡す方式に変更（`415f363`）
+- 経緯: `-static-libgcc` 等は flexlink が受理せず、`-link` パススルーは flexlink のシンボル解決チェックを通らないため、位置引数方式が唯一有効
+
+## G0.3 pin ゲート
+
+- `opam install . -n` → `install ocaml-webui dev (pinned)` 成功（ローカル path pin の dry-run）
+- `dune build -p ocaml-webui` 成功（install 時と同一のリリースビルド経路）
+- 新規 clone + switch + pin の完全再現は未実施だが、CI の clean checkout（`--recurse-submodules` → deps → build → runtest）が同等の依存解決を実証
+
+## 残課題（更新）
+
+- `install_probe.exe` の実 Window 実行検証（Windows 実機で `dune exec`）— CI 対象外の手動確認
