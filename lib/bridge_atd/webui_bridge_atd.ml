@@ -201,15 +201,43 @@ type ('output, 'error) responder = {
   output_to_yojson : 'output -> Yojson.Safe.t;
   error_to_yojson : 'error -> Yojson.Safe.t;
   mark_done : unit -> unit;
+  trace : Webui_trace.sink option;
+  received_at : float;
 }
 
 let responder_context (r : ('output, 'error) responder) = r.context
+
+let emit_submission r outcome submission =
+  match r.trace with
+  | None -> ()
+  | Some sink ->
+      sink
+        (Webui_trace.make ~name:"response_submitted"
+           ~trace_id:r.context.trace_id ~request_id:r.context.request_id
+           ~command:r.context.command
+           ~data:
+             [
+               ("outcome", `String outcome);
+               ("submission", `String submission);
+               ( "durationMs",
+                 `Float
+                   ((Unix.gettimeofday () -. r.received_at) *. 1000.) );
+             ]
+           ())
+
+let submission_name = function
+  | `Queued -> "queued"
+  | `Already_completed -> "already_completed"
+  | `Window_closing -> "window_closing"
+  | `Enqueue_failed _ -> "enqueue_failed"
+  | `Cancelled -> "cancelled"
 
 let responder_resolve (r : ('output, 'error) responder) (value : 'output) =
   let submission =
     Webui_raw.Call.resolve_json r.raw_call
       (Protocol.success_json r.context (r.output_to_yojson value))
   in
+  emit_submission r "resolved" (submission_name submission);
   r.mark_done ();
   submission
 
@@ -219,6 +247,7 @@ let responder_reject (r : ('output, 'error) responder) (error : 'error) =
       (Protocol.failure_json_raw (Some r.context)
          (r.error_to_yojson error))
   in
+  emit_submission r "rejected" (submission_name submission);
   r.mark_done ();
   submission
 
@@ -227,11 +256,16 @@ let responder_reject_protocol (r : ('output, 'error) responder) (error : Error.t
     Webui_raw.Call.reject_json r.raw_call
       (Protocol.failure_json (Some r.context) error)
   in
+  emit_submission r "rejected" (submission_name submission);
   r.mark_done ();
   submission
 
 let responder_cancel (r : ('output, 'error) responder) =
   let cancellation = Webui_raw.Call.cancel r.raw_call in
+  emit_submission r "cancelled"
+    (match cancellation with
+    | `Cancelled -> "cancelled"
+    | `Already_completed -> "already_completed");
   r.mark_done ();
   cancellation
 
@@ -320,6 +354,7 @@ type pending_entry = {
   context : context;
   token : Webui_async.cancellation_token;
   completed : bool Atomic.t;
+  received_at : float;
 }
 
 type t = {
@@ -442,7 +477,7 @@ let decode_input ~input_of_yojson responder request =
             ~message:"payload decode failed" ()));
     None
 
-let install window ~commands =
+let install ?trace window ~commands =
   match build_registry commands with
   | Error _ as error -> error
   | Ok registry -> (
@@ -456,6 +491,21 @@ let install window ~commands =
             let entry = Hashtbl.find_opt pending request_id in
             Mutex.unlock pending_lock;
             entry
+          in
+          let emit ~name ?(data = []) context =
+            match trace with
+            | None -> ()
+            | Some sink ->
+                sink
+                  (Webui_trace.make ~name ~trace_id:context.trace_id
+                     ~request_id:context.request_id
+                     ~command:context.command ~data ())
+          in
+          let emit_fields ~name ~trace_id ~request_id ~command data =
+            match trace with
+            | None -> ()
+            | Some sink ->
+                sink (Webui_trace.make ~name ~trace_id ~request_id ~command ~data ())
           in
           let make_entry raw_call context =
             let token =
@@ -472,6 +522,7 @@ let install window ~commands =
                 context;
                 token;
                 completed = Atomic.make false;
+                received_at = Unix.gettimeofday ();
               }
             in
             let mark_done () =
@@ -500,6 +551,16 @@ let install window ~commands =
                       Some { request_id; trace_id; command = "unknown" }
                   | _ -> None
                 in
+                emit_fields ~name:"invoke_decode_failed"
+                  ~trace_id:
+                    (Option.value ~default:"" decode_error.trace_id)
+                  ~request_id:
+                    (Option.value ~default:"" decode_error.request_id)
+                  ~command:"unknown"
+                  [
+                    ("code", `String decode_error.error.Error.code);
+                    ("message", `String decode_error.error.Error.message);
+                  ];
                 ignore
                   (Webui_raw.Call.reject_json raw_call
                      (Protocol.failure_json context decode_error.error))
@@ -523,7 +584,14 @@ let install window ~commands =
                             ])))
                 in
                 match pending_find cancel.target_request_id with
-                | None -> ack false
+                | None ->
+                    emit ~name:"request_cancelled" cancel_context
+                      ~data:
+                        [
+                          ("targetRequestId", `String cancel.target_request_id);
+                          ("cancelled", `Bool false);
+                        ];
+                    ack false
                 | Some entry ->
                     Webui_async.cancel entry.token `Js_cancel;
                     ignore
@@ -535,8 +603,15 @@ let install window ~commands =
                       Mutex.lock pending_lock;
                       Hashtbl.remove pending cancel.target_request_id;
                       Mutex.unlock pending_lock);
+                    emit ~name:"request_cancelled" cancel_context
+                      ~data:
+                        [
+                          ("targetRequestId", `String cancel.target_request_id);
+                          ("cancelled", `Bool true);
+                        ];
                     ack true)
             | Ok (Protocol.Invoke request) -> (
+                emit ~name:"invoke_received" request.context;
                 match Hashtbl.find_opt registry request.context.command with
                 | None ->
                     ignore
@@ -548,7 +623,7 @@ let install window ~commands =
                                  ("unknown command: " ^ request.context.command)
                                ())))
                 | Some (Packed (Command c)) ->
-                    let _entry, mark_done =
+                    let entry, mark_done =
                       make_entry raw_call request.context
                     in
                     let responder =
@@ -558,6 +633,8 @@ let install window ~commands =
                         output_to_yojson = c.output_to_yojson;
                         error_to_yojson = c.error_to_yojson;
                         mark_done;
+                        trace;
+                        received_at = entry.received_at;
                       }
                     in
                     (match
@@ -566,9 +643,20 @@ let install window ~commands =
                      with
                     | None -> ()
                     | Some input -> (
-                        try c.handler request.context input responder
+                        try
+                          c.handler request.context input responder;
+                          emit ~name:"handler_completed" request.context
+                            ~data:[ ("outcome", `String "returned") ]
                         with exn ->
                           log_handler_exception request.context exn;
+                          emit ~name:"handler_exception" request.context
+                            ~data:
+                              [
+                                ( "exception",
+                                  `String (Printexc.to_string exn) );
+                              ];
+                          emit ~name:"handler_completed" request.context
+                            ~data:[ ("outcome", `String "exception") ];
                           ignore
                             (responder_reject_protocol responder
                                (internal_error "internal_error"
@@ -584,6 +672,8 @@ let install window ~commands =
                         output_to_yojson = c.output_to_yojson;
                         error_to_yojson = c.error_to_yojson;
                         mark_done;
+                        trace;
+                        received_at = entry.received_at;
                       }
                     in
                     (match
@@ -593,11 +683,29 @@ let install window ~commands =
                     | None -> ()
                     | Some input ->
                         Webui_async.detach (fun () ->
+                            emit ~name:"handler_started" request.context;
                             (try
                                c.handler request.context input responder
-                                 entry.token
+                                 entry.token;
+                               emit ~name:"handler_completed" request.context
+                                 ~data:
+                                   [
+                                     ( "outcome",
+                                       `String
+                                         (if Atomic.get entry.completed then
+                                            "returned"
+                                          else "returned_without_response") );
+                                   ]
                              with exn ->
                                log_handler_exception request.context exn;
+                               emit ~name:"handler_exception" request.context
+                                 ~data:
+                                   [
+                                     ( "exception",
+                                       `String (Printexc.to_string exn) );
+                                   ];
+                               emit ~name:"handler_completed" request.context
+                                 ~data:[ ("outcome", `String "exception") ];
                                ignore
                                  (responder_reject_protocol responder
                                     (internal_error "internal_error"
@@ -616,6 +724,12 @@ let install window ~commands =
                                 Webui_async.sleep_ms timeout_ms;
                                 if not (Atomic.get entry.completed) then (
                                   Webui_async.cancel entry.token `Timeout;
+                                  emit ~name:"request_timeout"
+                                    request.context
+                                    ~data:
+                                      [
+                                        ("timeoutMs", `Int timeout_ms);
+                                      ];
                                   ignore
                                     (responder_reject_protocol responder
                                        (Error.make ~retryable:true

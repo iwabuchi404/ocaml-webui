@@ -140,9 +140,18 @@ type install_error =
 type t
 
 val install :
+  ?trace:Webui_trace.sink ->
   Webui_raw.Window.t ->
   commands:packed_command list ->
   (t, install_error) result
+(** [?trace] receives flat lifecycle events keyed by traceId/requestId.
+    When omitted, events are not constructed (zero overhead). Emitted
+    names: [invoke_received], [invoke_decode_failed], [handler_started]
+    (async only), [handler_completed] (outcome: returned /
+    returned_without_response / exception), [handler_exception],
+    [response_submitted] (outcome + submission + durationMs),
+    [request_cancelled] (targetRequestId + cancelled), [request_timeout]
+    (timeoutMs). *)
 
 val remove : t -> (unit, Webui_raw.Error.t) result
 

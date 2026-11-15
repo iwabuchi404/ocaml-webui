@@ -2,4 +2,4 @@
  (name webui_bridge_atd)
  (public_name ocaml-webui.bridge-atd)
  (libraries ocaml-webui.raw ocaml-webui.command-schema ocaml-webui.async
-   threads.posix yojson))
+   ocaml-webui.trace threads.posix yojson))

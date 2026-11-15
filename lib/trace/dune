@@ -1,0 +1,4 @@
+(library
+ (name webui_trace)
+ (public_name ocaml-webui.trace)
+ (libraries unix yojson))

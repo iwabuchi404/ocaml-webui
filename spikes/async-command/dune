@@ -2,7 +2,7 @@
  (name main)
  (modules main bundle_embed)
  (libraries unix threads yojson ocaml-webui.raw ocaml-webui.async
-   ocaml-webui.command-schema ocaml-webui.bridge-atd))
+   ocaml-webui.trace ocaml-webui.command-schema ocaml-webui.bridge-atd))
 
 ;; Copy generated TS codec from command_schema library
 (rule

@@ -99,12 +99,29 @@ let wait_until label predicate =
   done;
   if not (predicate ()) then failwith (label ^ " timed out")
 
-let install_bridge phase commands =
-  match Bridge.install phase.window ~commands with
+let install_bridge phase ?trace commands =
+  match Bridge.install ?trace phase.window ~commands with
   | Ok bridge -> bridge
   | Error (Bridge.Duplicate_command name) ->
       failwith ("duplicate command: " ^ name)
   | Error (Bridge.Raw_error error) -> fail_error error
+
+let events_for snapshot request_id =
+  List.filter_map
+    (fun (event : Webui_trace.event) ->
+      if event.Webui_trace.request_id = request_id then Some event.name
+      else None)
+    snapshot
+
+let expect_events label snapshot request_id expected =
+  let actual = events_for snapshot request_id in
+  List.iter
+    (fun name ->
+      if not (List.mem name actual) then
+        failwith
+          (Printf.sprintf "%s: missing event %s for %s (got: %s)" label
+             name request_id (String.concat "," actual)))
+    expected
 
 let assert_clean_destroy phase expected_bindings =
   let before_destroy = Webui_raw.Diagnostics.snapshot phase.window in
@@ -134,8 +151,9 @@ let interactive_html =
 let run_interactive_phase () =
   let phase = create_phase () in
   let report = Atomic.make None in
+  let trace_sink, trace_snapshot = Webui_trace.ring_buffer ~capacity:256 in
   let bridge =
-    install_bridge phase
+    install_bridge phase ~trace:trace_sink
       [
         Bridge.pack (analyze_command phase ~name:"async.analyze" ());
         Bridge.pack
@@ -181,6 +199,41 @@ let run_interactive_phase () =
   | Some `Queued -> ()
   | _ -> failwith "async resolve submission was not queued");
   wait_until "pending drained" (fun () -> Bridge.pending_count bridge = 0);
+  (* Trace verification: the full lifecycle must be visible per request. *)
+  wait_until "trace events" (fun () ->
+      let snapshot = trace_snapshot () in
+      List.mem "handler_completed"
+        (events_for snapshot "request-js-cancel")
+      && List.mem "handler_completed"
+           (events_for snapshot "request-ocaml-timeout"));
+  let snapshot = trace_snapshot () in
+  expect_events "resolve" snapshot "request-async-resolve"
+    [
+      "invoke_received"; "handler_started"; "response_submitted";
+      "handler_completed";
+    ];
+  expect_events "js-cancel" snapshot "request-js-cancel"
+    [ "invoke_received"; "handler_started"; "handler_completed" ];
+  expect_events "ocaml-timeout" snapshot "request-ocaml-timeout"
+    [
+      "invoke_received"; "handler_started"; "request_timeout";
+      "response_submitted"; "handler_completed";
+    ];
+  let cancel_events =
+    List.filter_map
+      (fun (event : Webui_trace.event) ->
+        if event.name = "request_cancelled" then Some event else None)
+      snapshot
+  in
+  if
+    not
+      (List.exists
+         (fun (event : Webui_trace.event) ->
+           List.mem ("targetRequestId", `String "request-js-cancel")
+             event.data
+           && List.mem ("cancelled", `Bool true) event.data)
+         cancel_events)
+  then failwith "trace: missing request_cancelled ack for request-js-cancel";
   ignore report_binding;
   assert_clean_destroy phase 2
 
@@ -197,8 +250,9 @@ ocamlWebui.invoke(
 let run_close_phase () =
   let phase = create_phase () in
   let closer_error = Atomic.make None in
+  let trace_sink, trace_snapshot = Webui_trace.ring_buffer ~capacity:64 in
   let bridge =
-    install_bridge phase
+    install_bridge phase ~trace:trace_sink
       [ Bridge.pack (analyze_command phase ~name:"async.analyze" ()) ]
   in
   require (Webui_raw.Window.set_html phase.window close_html);
@@ -226,6 +280,9 @@ let run_close_phase () =
   wait_until "window close reason" (fun () ->
       reason_observed phase "request-close" `Window_close);
   wait_until "pending drained" (fun () -> Bridge.pending_count bridge = 0);
+  let snapshot = trace_snapshot () in
+  expect_events "close" snapshot "request-close"
+    [ "invoke_received"; "handler_started"; "handler_completed" ];
   assert_clean_destroy phase 1
 
 let () =
