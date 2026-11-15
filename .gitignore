@@ -3,3 +3,11 @@
 *.install
 node_modules/
 
+
+# discover.exe output when run from repo root
+/c_flags.sexp
+/c_library_flags.sexp
+
+# Local tool configs
+.claude/settings.local.json
+.opencode/node_modules/
