@@ -12,7 +12,7 @@ let expect_raises label f =
 let read_fixture name =
   let dir = Filename.dirname Sys.executable_name in
   let path = Filename.concat (Filename.concat dir "fixtures") name in
-  let chan = open_in path in
+  let chan = open_in_bin path in
   let len = in_channel_length chan in
   let buf = Bytes.create len in
   really_input chan buf 0 len;
