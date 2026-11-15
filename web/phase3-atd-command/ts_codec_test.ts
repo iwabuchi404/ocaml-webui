@@ -291,5 +291,5 @@ if (failures > 0) {
   console.error(`${failures} test(s) failed`);
   process.exit(1);
 } else {
-  console.log("ts_codec_test: passed round-trip decode variant unknown-field malformed error-classification echo");
+  console.log("ts_codec_test: passed round-trip decode variant unknown-field malformed error-classification echo invoke-handle cancel");
 }
