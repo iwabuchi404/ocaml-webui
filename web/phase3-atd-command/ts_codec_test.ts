@@ -236,6 +236,55 @@ expectThrow(() => readEchoError({ code: "unknown", message: "x", retryable: fals
     assert(e.category === "internal", `internal error category: ${e.category}`);
   }
   (globalThis as any).__ocaml_webui_invoke = originalInvoke;
+
+  // invokeCommandHandle: cancel envelope shape + cancelled classification
+  const { invokeCommandHandle } = await import("./client.js");
+  const sent: any[] = [];
+  (globalThis as any).__ocaml_webui_invoke = async (req: any) => {
+    sent.push(req);
+    if (req.kind === "cancel") {
+      return {
+        protocol: 1,
+        requestId: req.requestId,
+        traceId: req.traceId,
+        command: "cancel",
+        ok: true,
+        value: { cancelled: true, targetRequestId: req.targetRequestId },
+      };
+    }
+    throw {
+      protocol: 1,
+      requestId: req.requestId,
+      traceId: req.traceId,
+      command: req.command,
+      ok: false,
+      error: { code: "cancelled", message: "request cancelled", retryable: false, category: "cancelled" },
+    };
+  };
+  {
+    const handle = invokeCommandHandle(
+      textAnalyze,
+      { text: "hi", delay_ms: 0 },
+      { requestId: "req-target", traceId: "trace-target" },
+    );
+    const ack = await handle.cancel();
+    assert(ack.cancelled === true, "cancel ack: cancelled should be true");
+    assert(ack.targetRequestId === "req-target", `cancel ack target: ${ack.targetRequestId}`);
+    const cancelMsg = sent.find((m) => m.kind === "cancel");
+    assert(cancelMsg !== undefined, "cancel envelope should be sent");
+    assert(cancelMsg.targetRequestId === "req-target", `cancel targetRequestId: ${cancelMsg.targetRequestId}`);
+    assert(cancelMsg.traceId === "trace-target", `cancel traceId: ${cancelMsg.traceId}`);
+    assert(typeof cancelMsg.requestId === "string" && cancelMsg.requestId !== "req-target", "cancel should carry its own requestId");
+    try {
+      await handle.promise;
+      assert(false, "cancelled invoke should reject");
+    } catch (e: any) {
+      assert(e instanceof ProtocolError, `cancelled: expected ProtocolError, got ${e?.constructor?.name}`);
+      assert(e.code === "cancelled", `cancelled code: ${e.code}`);
+      assert(e.category === "cancelled", `cancelled category: ${e.category}`);
+    }
+  }
+  (globalThis as any).__ocaml_webui_invoke = originalInvoke;
 }
 
 if (failures > 0) {

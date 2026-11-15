@@ -109,6 +109,56 @@ let expect_application_error_envelope () =
       | _ -> fail "app error: error field missing")
    | _ -> fail "app error: response not an object")
 
+let expect_message_decode_invoke () =
+  let json =
+    {|[{"protocol":1,"requestId":"req-6","traceId":"trace-6","command":"text.analyze","payload":{"text":"hi","delayMs":10}}]|}
+  in
+  match Bridge.Protocol.decode_message_json json with
+  | Ok (Bridge.Protocol.Invoke request) ->
+      if request.context.request_id <> "req-6" then
+        fail "invoke message requestId mismatch"
+  | _ -> fail "invoke envelope should decode as Invoke"
+
+let expect_message_decode_cancel () =
+  let json =
+    {|[{"protocol":1,"kind":"cancel","requestId":"cancel-1","traceId":"trace-7","targetRequestId":"req-6"}]|}
+  in
+  match Bridge.Protocol.decode_message_json json with
+  | Ok (Bridge.Protocol.Cancel cancel) ->
+      if cancel.request_id <> "cancel-1" then
+        fail "cancel requestId mismatch";
+      if cancel.trace_id <> "trace-7" then fail "cancel traceId mismatch";
+      if cancel.target_request_id <> "req-6" then
+        fail "cancel targetRequestId mismatch"
+  | _ -> fail "cancel envelope should decode as Cancel"
+
+let expect_message_decode_cancel_defaults () =
+  let json =
+    {|[{"protocol":1,"kind":"cancel","requestId":"cancel-2","targetRequestId":"req-7"}]|}
+  in
+  match Bridge.Protocol.decode_message_json json with
+  | Ok (Bridge.Protocol.Cancel cancel) ->
+      if cancel.trace_id <> "" then fail "cancel traceId should default to empty"
+  | _ -> fail "cancel without traceId should still decode"
+
+let expect_message_decode_invalid () =
+  (match
+     Bridge.Protocol.decode_message_json
+       {|[{"protocol":1,"kind":"cancel","requestId":"cancel-3"}]|}
+   with
+  | Error { Bridge.Protocol.error = { code; _ }; _ } ->
+      if code <> "invalid_request" then
+        fail ("expected invalid_request, got " ^ code)
+  | Ok _ -> fail "cancel without targetRequestId should fail");
+  match
+    Bridge.Protocol.decode_message_json
+      {|[{"protocol":1,"kind":"bogus","requestId":"req-9"}]|}
+  with
+  | Error { Bridge.Protocol.error = { code; _ }; _ } ->
+      if code <> "invalid_request" then
+        fail ("expected invalid_request, got " ^ code)
+  | Ok _ -> fail "unknown kind should fail"
+
 let () =
   expect_valid_request ();
   expect_invalid_json ();
@@ -116,4 +166,9 @@ let () =
   expect_missing_field ();
   expect_response_identity ();
   expect_application_error_envelope ();
-  Printf.printf "atd_protocol_test: passed request error response identity app-error\n%!"
+  expect_message_decode_invoke ();
+  expect_message_decode_cancel ();
+  expect_message_decode_cancel_defaults ();
+  expect_message_decode_invalid ();
+  Printf.printf
+    "atd_protocol_test: passed request error response identity app-error cancel\n%!"

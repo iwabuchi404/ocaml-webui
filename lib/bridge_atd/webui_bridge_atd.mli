@@ -10,6 +10,16 @@ type context = {
   command : string;
 }
 
+(** Cooperative cancellation token passed to async Command handlers. Check
+    {!token_is_cancelled} at handler checkpoints; nothing forcibly interrupts
+    running work. Reasons: [`Js_cancel] (cancel message from JS), [`Timeout]
+    (per-command watchdog), [`Window_close] (native cancel propagation). *)
+type cancellation_token = Webui_async.cancellation_token
+
+val token_is_cancelled : cancellation_token -> bool
+val token_cancel_reason :
+  cancellation_token -> Webui_async.cancel_reason option
+
 module Error : sig
   type t = {
     code : string;
@@ -41,6 +51,19 @@ module Protocol : sig
   }
 
   val decode_request_json : string -> (request, decode_error) result
+
+  (** Envelope-level decode. A [{kind:"cancel"}] envelope cancels the call
+      identified by [targetRequestId]; a missing or absent [kind] is a normal
+      invoke envelope. *)
+  type message =
+    | Invoke of request
+    | Cancel of {
+        request_id : string;
+        trace_id : string;
+        target_request_id : string;
+      }
+
+  val decode_message_json : string -> (message, decode_error) result
   val success_json : context -> Yojson.Safe.t -> string
   val failure_json : context option -> Error.t -> string
   val failure_json_raw : context option -> Yojson.Safe.t -> string
@@ -86,6 +109,27 @@ val define :
    unit) ->
   ('input, 'output, 'error) command
 
+(** Like {!define} but the handler runs on a spawned worker domain, keeping
+    the UI thread free. The handler receives a {!cancellation_token} to poll
+    at its own checkpoints.
+
+    - If the handler returns without a responder call, the request is rejected
+      with [internal_error / handler_returned_without_response].
+    - [~timeout_ms] rejects the call with [timeout] (category ["timeout"],
+      retryable) when still pending after the deadline; the worker keeps
+      running but its late response is discarded by the one-shot Call.
+    - A JS [cancel] message rejects with [cancelled] (category ["cancelled"]). *)
+val define_async :
+  ('input, 'output, 'error) codec ->
+  name:string ->
+  ?timeout_ms:int ->
+  (context ->
+   'input ->
+   ('output, 'error) responder ->
+   cancellation_token ->
+   unit) ->
+  ('input, 'output, 'error) command
+
 val pack : ('input, 'output, 'error) command -> packed_command
 val command_name : packed_command -> string
 
@@ -101,3 +145,7 @@ val install :
   (t, install_error) result
 
 val remove : t -> (unit, Webui_raw.Error.t) result
+
+(** Number of calls currently tracked in the pending registry. Useful for
+    leak checks: after all in-flight commands complete it returns to 0. *)
+val pending_count : t -> int

@@ -10,6 +10,11 @@ type context = {
   command : string;
 }
 
+type cancellation_token = Webui_async.cancellation_token
+
+let token_is_cancelled = Webui_async.is_cancelled
+let token_cancel_reason = Webui_async.cancel_reason
+
 module Error = struct
   type t = {
     code : string;
@@ -104,6 +109,47 @@ module Protocol = struct
     | exception Yojson.Json_error message ->
         decode_error "invalid_json" message
 
+  type message =
+    | Invoke of request
+    | Cancel of {
+        request_id : string;
+        trace_id : string;
+        target_request_id : string;
+      }
+
+  (** Envelope-level decode. [{kind:"cancel"}] cancels the call identified by
+      [targetRequestId]; a missing or ["invoke"] kind is an invoke envelope. *)
+  let decode_message_json json =
+    match Yojson.Safe.from_string json with
+    | `List [ `Assoc fields ] -> (
+        match optional_string fields "kind" with
+        | Some "cancel" -> (
+            match
+              ( optional_string fields "requestId",
+                optional_string fields "targetRequestId" )
+            with
+            | Some request_id, Some target_request_id ->
+                let trace_id =
+                  match optional_string fields "traceId" with
+                  | Some trace_id -> trace_id
+                  | None -> ""
+                in
+                Ok (Cancel { request_id; trace_id; target_request_id })
+            | _ ->
+                decode_error "invalid_request"
+                  "cancel requires requestId and targetRequestId")
+        | Some kind ->
+            decode_error "invalid_request" ("unknown kind: " ^ kind)
+        | None -> (
+            match decode_object fields with
+            | Ok request -> Ok (Invoke request)
+            | Error decode_error -> Error decode_error))
+    | _ ->
+        decode_error "invalid_request"
+          "native binding expects exactly one request envelope"
+    | exception Yojson.Json_error message ->
+        decode_error "invalid_json" message
+
   let identity_fields (context : context option) =
     match context with
     | None ->
@@ -154,25 +200,40 @@ type ('output, 'error) responder = {
   context : context;
   output_to_yojson : 'output -> Yojson.Safe.t;
   error_to_yojson : 'error -> Yojson.Safe.t;
+  mark_done : unit -> unit;
 }
 
 let responder_context (r : ('output, 'error) responder) = r.context
 
 let responder_resolve (r : ('output, 'error) responder) (value : 'output) =
-  Webui_raw.Call.resolve_json r.raw_call
-    (Protocol.success_json r.context (r.output_to_yojson value))
+  let submission =
+    Webui_raw.Call.resolve_json r.raw_call
+      (Protocol.success_json r.context (r.output_to_yojson value))
+  in
+  r.mark_done ();
+  submission
 
 let responder_reject (r : ('output, 'error) responder) (error : 'error) =
-  Webui_raw.Call.reject_json r.raw_call
-    (Protocol.failure_json_raw (Some r.context)
-       (r.error_to_yojson error))
+  let submission =
+    Webui_raw.Call.reject_json r.raw_call
+      (Protocol.failure_json_raw (Some r.context)
+         (r.error_to_yojson error))
+  in
+  r.mark_done ();
+  submission
 
 let responder_reject_protocol (r : ('output, 'error) responder) (error : Error.t) =
-  Webui_raw.Call.reject_json r.raw_call
-    (Protocol.failure_json (Some r.context) error)
+  let submission =
+    Webui_raw.Call.reject_json r.raw_call
+      (Protocol.failure_json (Some r.context) error)
+  in
+  r.mark_done ();
+  submission
 
 let responder_cancel (r : ('output, 'error) responder) =
-  Webui_raw.Call.cancel r.raw_call
+  let cancellation = Webui_raw.Call.cancel r.raw_call in
+  r.mark_done ();
+  cancellation
 
 type ('input, 'output, 'error) command =
   | Command :
@@ -185,6 +246,21 @@ type ('input, 'output, 'error) command =
             context ->
             'input ->
             ('output, 'error) responder ->
+            unit;
+      }
+      -> ('input, 'output, 'error) command
+  | Async_command :
+      {
+        name : string;
+        input_of_yojson : Yojson.Safe.t -> 'input;
+        output_to_yojson : 'output -> Yojson.Safe.t;
+        error_to_yojson : 'error -> Yojson.Safe.t;
+        timeout_ms : int option;
+        handler :
+            context ->
+            'input ->
+            ('output, 'error) responder ->
+            cancellation_token ->
             unit;
       }
       -> ('input, 'output, 'error) command
@@ -209,15 +285,48 @@ let define
     handler;
   }
 
+let define_async
+    (codec : ('input, 'output, 'error) codec)
+    ~name
+    ?timeout_ms
+    (handler :
+       context ->
+       'input ->
+       ('output, 'error) responder ->
+       cancellation_token ->
+       unit) :
+    ('input, 'output, 'error) command =
+  Async_command {
+    name;
+    input_of_yojson = codec.input_of_yojson;
+    output_to_yojson = codec.output_to_yojson;
+    error_to_yojson = codec.error_to_yojson;
+    timeout_ms;
+    handler;
+  }
+
 let pack command = Packed command
 
-let command_name (Packed (Command c)) = c.name
+let command_name = function
+  | Packed (Command c) -> c.name
+  | Packed (Async_command c) -> c.name
 
 type install_error =
   | Duplicate_command of string
   | Raw_error of Webui_raw.Error.t
 
-type t = { binding : Webui_raw.Binding.t }
+type pending_entry = {
+  raw_call : Webui_raw.Call.t;
+  context : context;
+  token : Webui_async.cancellation_token;
+  completed : bool Atomic.t;
+}
+
+type t = {
+  binding : Webui_raw.Binding.t;
+  pending : (string, pending_entry) Hashtbl.t;
+  pending_lock : Mutex.t;
+}
 
 let client_javascript =
   {js|(function () {
@@ -228,6 +337,15 @@ let client_javascript =
       return prefix + "-" + globalThis.crypto.randomUUID();
     }
     return prefix + "-" + Date.now().toString(36) + "-" + sequence.toString(36);
+  }
+  function sendCancel(requestId, traceId) {
+    return globalThis.__ocaml_webui_invoke({
+      protocol: 1,
+      kind: "cancel",
+      requestId: nextId("cancel"),
+      traceId,
+      targetRequestId: requestId
+    });
   }
   globalThis.ocamlWebui = Object.freeze({
     invoke(command, payload, options = {}) {
@@ -240,6 +358,40 @@ let client_javascript =
         command,
         payload
       });
+    },
+    invokeHandle(command, payload, options = {}) {
+      const requestId = options.requestId || nextId("request");
+      const traceId = options.traceId || nextId("trace");
+      const inner = globalThis.__ocaml_webui_invoke({
+        protocol: 1,
+        requestId,
+        traceId,
+        command,
+        payload
+      });
+      const cancel = function () { return sendCancel(requestId, traceId); };
+      let promise;
+      if (options.timeoutMs != null) {
+        let timeoutId = null;
+        promise = Promise.race([
+          inner,
+          new Promise(function (resolve, reject) {
+            timeoutId = setTimeout(function () {
+              sendCancel(requestId, traceId);
+              reject({
+                code: "timeout",
+                message: "request timed out",
+                retryable: true,
+                category: "timeout"
+              });
+            }, options.timeoutMs);
+          })
+        ]);
+        promise = promise.finally(function () { clearTimeout(timeoutId); });
+      } else {
+        promise = inner;
+      }
+      return { promise, cancel };
     }
   });
 })();|js}
@@ -280,6 +432,16 @@ let log_decode_exception context exn =
     ]
   |> Yojson.Safe.to_string |> Printf.eprintf "%s\n%!"
 
+let decode_input ~input_of_yojson responder request =
+  try Some (input_of_yojson request.Protocol.payload)
+  with exn ->
+    log_decode_exception request.context exn;
+    ignore
+      (responder_reject_protocol responder
+         (Error.make ~category:"protocol" ~code:"invalid_payload"
+            ~message:"payload decode failed" ()));
+    None
+
 let install window ~commands =
   match build_registry commands with
   | Error _ as error -> error
@@ -287,9 +449,48 @@ let install window ~commands =
       match Webui_raw.Window.init window client_javascript with
       | Error error -> Error (Raw_error error)
       | Ok () ->
+          let pending = Hashtbl.create 16 in
+          let pending_lock = Mutex.create () in
+          let pending_find request_id =
+            Mutex.lock pending_lock;
+            let entry = Hashtbl.find_opt pending request_id in
+            Mutex.unlock pending_lock;
+            entry
+          in
+          let make_entry raw_call context =
+            let token =
+              Webui_async.token
+                ~external_check:(fun () ->
+                  if Webui_raw.Call.is_cancelled raw_call then
+                    Some `Window_close
+                  else None)
+                ()
+            in
+            let entry =
+              {
+                raw_call;
+                context;
+                token;
+                completed = Atomic.make false;
+              }
+            in
+            let mark_done () =
+              if not (Atomic.exchange entry.completed true) then (
+                Mutex.lock pending_lock;
+                Hashtbl.remove pending context.request_id;
+                Mutex.unlock pending_lock)
+            in
+            Mutex.lock pending_lock;
+            Hashtbl.replace pending context.request_id entry;
+            Mutex.unlock pending_lock;
+            (entry, mark_done)
+          in
+          let internal_error code message =
+            Error.make ~category:"internal" ~code ~message ()
+          in
           let invoke raw_call =
             match
-              Protocol.decode_request_json
+              Protocol.decode_message_json
                 (Webui_raw.Call.request_json raw_call)
             with
             | Error decode_error ->
@@ -302,7 +503,40 @@ let install window ~commands =
                 ignore
                   (Webui_raw.Call.reject_json raw_call
                      (Protocol.failure_json context decode_error.error))
-            | Ok request -> (
+            | Ok (Protocol.Cancel cancel) -> (
+                let cancel_context =
+                  {
+                    request_id = cancel.request_id;
+                    trace_id = cancel.trace_id;
+                    command = "cancel";
+                  }
+                in
+                let ack cancelled =
+                  ignore
+                    (Webui_raw.Call.resolve_json raw_call
+                       (Protocol.success_json cancel_context
+                          (`Assoc
+                            [
+                              ("cancelled", `Bool cancelled);
+                              ( "targetRequestId",
+                                `String cancel.target_request_id );
+                            ])))
+                in
+                match pending_find cancel.target_request_id with
+                | None -> ack false
+                | Some entry ->
+                    Webui_async.cancel entry.token `Js_cancel;
+                    ignore
+                      (Webui_raw.Call.reject_json entry.raw_call
+                         (Protocol.failure_json (Some entry.context)
+                            (Error.make ~category:"cancelled" ~code:"cancelled"
+                               ~message:"request cancelled" ())));
+                    if not (Atomic.exchange entry.completed true) then (
+                      Mutex.lock pending_lock;
+                      Hashtbl.remove pending cancel.target_request_id;
+                      Mutex.unlock pending_lock);
+                    ack true)
+            | Ok (Protocol.Invoke request) -> (
                 match Hashtbl.find_opt registry request.context.command with
                 | None ->
                     ignore
@@ -314,46 +548,91 @@ let install window ~commands =
                                  ("unknown command: " ^ request.context.command)
                                ())))
                 | Some (Packed (Command c)) ->
+                    let _entry, mark_done =
+                      make_entry raw_call request.context
+                    in
                     let responder =
                       {
                         raw_call;
                         context = request.context;
                         output_to_yojson = c.output_to_yojson;
                         error_to_yojson = c.error_to_yojson;
+                        mark_done;
                       }
                     in
-                    let decode_ok = ref true in
-                    (try
-                       let input =
-                         try c.input_of_yojson request.payload
-                         with exn ->
-                           log_decode_exception request.context exn;
-                           ignore
-                             (responder_reject_protocol responder
-                                (Error.make ~category:"protocol"
-                                   ~code:"invalid_payload"
-                                   ~message:"payload decode failed" ()));
-                           decode_ok := false;
-                           raise Exit
-                       in
-                       c.handler request.context input responder
+                    (match
+                       decode_input ~input_of_yojson:c.input_of_yojson
+                         responder request
                      with
-                     | Exit when not !decode_ok -> ()
-                     | exn ->
-                       if !decode_ok then begin
-                         log_handler_exception request.context exn;
-                         ignore
-                           (responder_reject_protocol responder
-                              (Error.make ~category:"internal"
-                                 ~code:"internal_error"
-                                 ~message:"command handler raised" ()))
-                       end))
+                    | None -> ()
+                    | Some input -> (
+                        try c.handler request.context input responder
+                        with exn ->
+                          log_handler_exception request.context exn;
+                          ignore
+                            (responder_reject_protocol responder
+                               (internal_error "internal_error"
+                                  "command handler raised"))))
+                | Some (Packed (Async_command c)) ->
+                    let entry, mark_done =
+                      make_entry raw_call request.context
+                    in
+                    let responder =
+                      {
+                        raw_call;
+                        context = request.context;
+                        output_to_yojson = c.output_to_yojson;
+                        error_to_yojson = c.error_to_yojson;
+                        mark_done;
+                      }
+                    in
+                    (match
+                       decode_input ~input_of_yojson:c.input_of_yojson
+                         responder request
+                     with
+                    | None -> ()
+                    | Some input ->
+                        Webui_async.detach (fun () ->
+                            (try
+                               c.handler request.context input responder
+                                 entry.token
+                             with exn ->
+                               log_handler_exception request.context exn;
+                               ignore
+                                 (responder_reject_protocol responder
+                                    (internal_error "internal_error"
+                                       "command handler raised")));
+                            if not (Atomic.get entry.completed) then
+                              ignore
+                                (responder_reject_protocol responder
+                                   (internal_error
+                                      "handler_returned_without_response"
+                                      "async handler returned without \
+                                       responding")));
+                        (match c.timeout_ms with
+                        | None -> ()
+                        | Some timeout_ms ->
+                            Webui_async.detach (fun () ->
+                                Webui_async.sleep_ms timeout_ms;
+                                if not (Atomic.get entry.completed) then (
+                                  Webui_async.cancel entry.token `Timeout;
+                                  ignore
+                                    (responder_reject_protocol responder
+                                       (Error.make ~retryable:true
+                                          ~category:"timeout" ~code:"timeout"
+                                          ~message:"command timed out" ())))))))
           in
           match
             Webui_raw.Binding.create window ~name:"__ocaml_webui_invoke"
               invoke
           with
-          | Ok binding -> Ok { binding }
+          | Ok binding -> Ok { binding; pending; pending_lock }
           | Error error -> Error (Raw_error error))
 
 let remove bridge = Webui_raw.Binding.remove bridge.binding
+
+let pending_count bridge =
+  Mutex.lock bridge.pending_lock;
+  let count = Hashtbl.length bridge.pending in
+  Mutex.unlock bridge.pending_lock;
+  count

@@ -1,0 +1,4 @@
+(library
+ (name webui_async)
+ (public_name ocaml-webui.async)
+ (libraries threads.posix))

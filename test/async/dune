@@ -1,0 +1,3 @@
+(test
+ (name webui_async_test)
+ (libraries ocaml-webui.async unix))

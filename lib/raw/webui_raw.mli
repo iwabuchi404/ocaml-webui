@@ -102,6 +102,11 @@ module Call : sig
   type cancellation = [ `Cancelled | `Already_completed ]
 
   val request_json : t -> string
+
+  (** Whether the call has been cancelled (explicit [cancel] or the native
+      cancel path, e.g. window close). Thread-safe; may be polled from a
+      worker Domain. *)
+  val is_cancelled : t -> bool
   (* [result_json] must contain valid JSON. [`Queued] means that the response
      was accepted for owner-thread delivery; it does not guarantee that the
      native engine ultimately delivered it to JavaScript. *)

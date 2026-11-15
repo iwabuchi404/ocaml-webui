@@ -206,6 +206,7 @@ module Call = struct
 
   let request_json call = call.request_json
   let state call = Atomic.get call.state
+  let is_cancelled call = Atomic.get call.state = Cancelled
 
   let respond call status result_json =
     if not (Atomic.compare_and_set call.state Pending Dispatch_queued) then

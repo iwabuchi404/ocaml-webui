@@ -87,6 +87,40 @@ export interface InvokeOptions {
   traceId?: string;
 }
 
+/** Classify a native response into a typed result or a thrown error. */
+function decodeCommandResponse<I, O, E>(
+  descriptor: CommandDescriptor<I, O, E>,
+  response: NativeResponse,
+): O {
+  if (response.ok) {
+    return descriptor.readResult(response.value);
+  }
+
+  // Protocol/internal/lifecycle errors must not be decoded as application
+  // errors, even if the error code happens to match a valid application
+  // error variant (e.g. "invalid_payload" exists in both spaces).
+  const category = response.error?.category;
+  if (
+    category === "protocol" ||
+    category === "internal" ||
+    category === "cancelled" ||
+    category === "timeout"
+  ) {
+    throw new ProtocolError(response);
+  }
+
+  // Try to decode as application error
+  try {
+    const typedError = descriptor.readError(response.error);
+    throw new ApplicationError<E>(response, typedError);
+  } catch (e) {
+    if (e instanceof ApplicationError) throw e;
+    // Not an application error — treat as protocol error
+  }
+
+  throw new ProtocolError(response);
+}
+
 /** Typed invoke: encodes the request, sends it, decodes the response. */
 export async function invokeCommand<I, O, E>(
   descriptor: CommandDescriptor<I, O, E>,
@@ -108,28 +142,67 @@ export async function invokeCommand<I, O, E>(
     response = rejection as NativeResponse;
   }
 
-  if (response.ok) {
-    return descriptor.readResult(response.value);
-  }
+  return decodeCommandResponse(descriptor, response);
+}
 
-  // Protocol/internal errors must not be decoded as application errors,
-  // even if the error code happens to match a valid application error variant
-  // (e.g. "invalid_payload" exists in both protocol and application error spaces).
-  const category = response.error?.category;
-  if (category === "protocol" || category === "internal") {
-    throw new ProtocolError(response);
-  }
+/** Result of a cancel acknowledgement from the bridge. */
+export interface CancelAck {
+  cancelled: boolean;
+  targetRequestId: string;
+}
 
-  // Try to decode as application error
-  try {
-    const typedError = descriptor.readError(response.error);
-    throw new ApplicationError<E>(response, typedError);
-  } catch (e) {
-    if (e instanceof ApplicationError) throw e;
-    // Not an application error — treat as protocol error
-  }
+/** A cancellable typed invocation. */
+export interface InvokeHandle<O> {
+  promise: Promise<O>;
+  cancel: () => Promise<CancelAck>;
+}
 
-  throw new ProtocolError(response);
+/** Typed invoke that returns a handle whose [cancel] sends a cancel
+    envelope targeting this request. The promise rejects with a
+    ProtocolError (code "cancelled") if the bridge accepts the cancel. */
+export function invokeCommandHandle<I, O, E>(
+  descriptor: CommandDescriptor<I, O, E>,
+  input: I,
+  options: InvokeOptions = {}
+): InvokeHandle<O> {
+  const payload = descriptor.writeRequest(input);
+  const requestId = options.requestId ?? generateId("request");
+  const traceId = options.traceId ?? generateId("trace");
+
+  const promise = (async () => {
+    let response: NativeResponse;
+    try {
+      response = await globalThis.__ocaml_webui_invoke({
+        protocol: 1,
+        requestId,
+        traceId,
+        command: descriptor.name,
+        payload,
+      }) as NativeResponse;
+    } catch (rejection: unknown) {
+      response = rejection as NativeResponse;
+    }
+    return decodeCommandResponse(descriptor, response);
+  })();
+
+  const cancel = async (): Promise<CancelAck> => {
+    const response = await globalThis.__ocaml_webui_invoke({
+      protocol: 1,
+      kind: "cancel",
+      requestId: generateId("cancel"),
+      traceId,
+      targetRequestId: requestId,
+    }) as NativeResponse;
+    const value = response.value as
+      | { cancelled?: boolean; targetRequestId?: string }
+      | undefined;
+    return {
+      cancelled: value?.cancelled === true,
+      targetRequestId: value?.targetRequestId ?? requestId,
+    };
+  };
+
+  return { promise, cancel };
 }
 
 /** Define a typed command from its name and ATD-generated codec functions. */
