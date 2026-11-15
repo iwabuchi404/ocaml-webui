@@ -109,6 +109,14 @@ opam exec -- dune exec test/bridge_atd/install_probe.exe
 opam exec -- dune runtest test/bridge_baseline
 ```
 
+The async Command probe exercises `define_async` end to end — worker-domain
+execution, JS cancel, OCaml/JS timeouts, and close-while-pending — against a
+real WebView2 window:
+
+```powershell
+opam exec -- dune exec spikes/async-command/main.exe
+```
+
 The resource-safety probe deliberately finalizes one live Window to verify leak
 detection. It may emit a backend cleanup warning while still exiting with
 success. WSLg may also emit EGL/Zink fallback warnings; these are distinct from
