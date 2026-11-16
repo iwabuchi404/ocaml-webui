@@ -87,8 +87,10 @@ val restart_count : worker -> int
 val pending_count : worker -> int
 
 val shutdown_all : unit -> unit
-(** Kills every live worker registered by {!spawn}. Intended for
-    application shutdown. *)
+(** Kills every live worker registered by {!spawn} (any scope), then
+    revokes [Webui_resource.App] so other app-scoped resources release
+    too. Intended for application shutdown; callers wanting finer-grained
+    control use [Webui_resource.revoke_scope] directly. *)
 
 (** {2 Trace events}
 

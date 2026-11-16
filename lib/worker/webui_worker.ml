@@ -418,4 +418,10 @@ let request w ?(trace_id = "") ?timeout_ms ?token ~method_ params =
         in
         poll ()
 
-let shutdown_all () = List.iter kill (Registry.snapshot ())
+(* Kills every live worker (any scope), then revokes the App scope so
+   non-worker app resources registered via Webui_resource are released
+   too. This is the compatibility path for the resource layer: callers
+   wanting finer control use Webui_resource.revoke_scope directly. *)
+let shutdown_all () =
+  List.iter kill (Registry.snapshot ());
+  ignore (Webui_resource.revoke_scope Webui_resource.App)
