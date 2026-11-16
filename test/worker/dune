@@ -7,4 +7,4 @@
  (name worker_test)
  (modules worker_test)
  (deps ./echo_worker.exe)
- (libraries unix yojson ocaml-webui.trace ocaml-webui.worker))
+ (libraries unix yojson ocaml-webui.async ocaml-webui.trace ocaml-webui.worker))

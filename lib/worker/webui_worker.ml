@@ -6,6 +6,7 @@ type error =
   | Worker_killed
   | Worker_dead
   | Timeout
+  | Cancelled
   | Remote_error of Yojson.Safe.t
   | Protocol_error of string
 
@@ -282,7 +283,7 @@ let restart_count w = w.restart_count
 let pending_count w =
   Mutex.protect w.mutex (fun () -> Hashtbl.length w.pending)
 
-let request w ?(trace_id = "") ?timeout_ms ~method_ params =
+let request w ?(trace_id = "") ?timeout_ms ?token ~method_ params =
   let acquired =
     Mutex.protect w.mutex (fun () ->
         match w.proc, w.status with
@@ -342,18 +343,31 @@ let request w ?(trace_id = "") ?timeout_ms ~method_ params =
           | Some ms -> Unix.gettimeofday () +. (float_of_int ms /. 1000.)
           | None -> Float.max_float
         in
+        let token_cancelled () =
+          match token with
+          | Some t -> Webui_async.is_cancelled t
+          | None -> false
+        in
         let rec poll () =
           match
             Mutex.protect w.mutex (fun () ->
                 match pended.result with
                 | Some r -> `Done r
                 | None ->
-                    if Unix.gettimeofday () >= deadline then (
+                    if token_cancelled () then (
+                      Hashtbl.remove w.pending id;
+                      `Cancelled_tok)
+                    else if Unix.gettimeofday () >= deadline then (
                       Hashtbl.remove w.pending id;
                       `Timed_out)
                     else `Wait)
           with
           | `Done r -> r
+          | `Cancelled_tok ->
+              emit w ~trace_id ~request_id:(string_of_int id)
+                ~name:"worker_request_cancelled"
+                [ ("method", `String method_); ("request_id", `Int id) ];
+              Error Cancelled
           | `Timed_out ->
               emit w ~trace_id ~request_id:(string_of_int id)
                 ~name:"worker_timeout"

@@ -29,6 +29,11 @@ type error =
   | Worker_killed  (** Killed via {!kill} or {!shutdown_all}. *)
   | Worker_dead  (** Request sent to a dead worker with no restart left. *)
   | Timeout  (** Per-request deadline elapsed; worker remains alive. *)
+  | Cancelled
+      (** The caller's token cancelled while waiting; the request was
+          abandoned locally. The worker keeps running and the late
+          response is discarded when it arrives. Does NOT kill the
+          worker -- use {!kill} for that. *)
   | Remote_error of Yojson.Safe.t  (** JSON-RPC [error] object. *)
   | Protocol_error of string
 
@@ -49,13 +54,19 @@ val request :
   worker ->
   ?trace_id:string ->
   ?timeout_ms:int ->
+  ?token:Webui_async.cancellation_token ->
   method_:string ->
   Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
 (** Sends [{"jsonrpc":"2.0","id":n,"method":m,"params":p}] and waits for the
     matching response. Returns the [result] payload, or [Remote_error] when
     the response carries an [error] object. Emits [worker_request] and
-    [worker_response]/[worker_timeout]. *)
+    [worker_response]/[worker_timeout]/[worker_request_cancelled].
+
+    [?token] abandons the wait when cancelled: the pending entry is
+    removed so the eventual response is reported as [worker_late_response].
+    The worker is left running -- appropriate for shared persistent
+    workers where one caller's cancellation must not kill the process. *)
 
 val kill : worker -> unit
 (** Force-terminates the process. Pending requests fail with
@@ -82,6 +93,7 @@ val shutdown_all : unit -> unit
     - [worker_request] \{method, request_id\} (+ trace_id when given)
     - [worker_response] \{request_id, outcome, duration_ms\}
     - [worker_timeout] \{method, request_id, timeout_ms\}
+    - [worker_request_cancelled] \{method, request_id\}
     - [worker_late_response] \{request_id\}
     - [worker_notification] \{method\}  -- received, not per request
     - [worker_protocol_error] \{line\}  -- truncated unparseable line

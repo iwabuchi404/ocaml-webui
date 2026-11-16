@@ -142,6 +142,45 @@ let test_notification () =
   check "notification delivered" ok;
   W.kill w
 
+let test_token_cancel () =
+  let sink, snapshot = Webui_trace.ring_buffer ~capacity:64 in
+  let w =
+    match W.spawn ~name:"tokcancel" ~argv:echo_argv ~trace:sink () with
+    | Ok w -> w
+    | Error _ -> incr failures; failwith "spawn failed"
+  in
+  let token = Webui_async.token () in
+  let done_ = ref false in
+  let res = ref (Ok `Null) in
+  let (_ : unit Domain.t) =
+    Domain.spawn (fun () ->
+        res :=
+          W.request w ~token ~method_:"sleep"
+            (`Assoc [ ("ms", `Int 500) ]);
+        done_ := true)
+  in
+  Unix.sleepf 0.1;
+  Webui_async.cancel token `Js_cancel;
+  check "cancel completed" (wait_until ~ms:2000 (fun () -> !done_));
+  check "cancel error" (!res = Error W.Cancelled);
+  check "worker survives cancel" (W.is_alive w);
+  (* the worker finishes the abandoned request; the late response is
+     discarded instead of being delivered *)
+  check "late response discarded"
+    (wait_until ~ms:2000 (fun () ->
+         List.exists
+           (fun (e : Webui_trace.event) ->
+             e.Webui_trace.name = "worker_late_response")
+           (snapshot ())));
+  check "cancel event emitted"
+    (List.exists
+       (fun (e : Webui_trace.event) ->
+         e.Webui_trace.name = "worker_request_cancelled")
+       (snapshot ()));
+  let r2 = W.request w ~method_:"echo" `Null in
+  check "post-cancel echo" (match r2 with Ok _ -> true | Error _ -> false);
+  W.kill w
+
 let test_shutdown_all () =
   let w1 = expect_ok "sa1" in
   let w2 = expect_ok "sa2" in
@@ -180,6 +219,7 @@ let () =
   test_crash_restart ();
   test_restart_limit ();
   test_notification ();
+  test_token_cancel ();
   test_shutdown_all ();
   test_trace ();
   if !failures = 0 then
