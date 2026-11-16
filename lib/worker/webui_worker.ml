@@ -38,6 +38,7 @@ type worker = {
   mutable status : status;
   mutable restart_count : int;
   mutable next_id : int;
+  mutable resource : Webui_resource.resource option;
 }
 
 let emit w ?(trace_id = "") ?(request_id = "") ~name data =
@@ -222,7 +223,10 @@ and on_eof w p =
   List.iter (fun (name, data) -> emit w ~name data) events;
   match next with
   | `Restart np -> reader_loop w np
-  | `Stop -> ()
+  | `Stop -> (
+      match w.resource with
+      | Some r -> Webui_resource.release r
+      | None -> ())
 
 (* Flat registry backing [shutdown_all]; entries are pruned lazily. *)
 module Registry = struct
@@ -239,8 +243,33 @@ module Registry = struct
   let snapshot () = Mutex.protect mutex (fun () -> !workers)
 end
 
+let is_alive w =
+  Mutex.protect w.mutex (fun () -> w.status = Alive && w.proc <> None)
+
+let kill w =
+  let target =
+    Mutex.protect w.mutex (fun () ->
+        if w.status = Killed then None
+        else (
+          w.status <- Killed;
+          let failed = fail_all_pending w Worker_killed in
+          Registry.remove w;
+          match w.proc with
+          | Some p -> Some (p.pid, failed)
+          | None -> None))
+  in
+  match target with
+  | Some (pid_, failed) ->
+      emit w ~name:"worker_killed"
+        [ ("pid", `Int pid_); ("pending_failed", `Int failed) ];
+      terminate pid_;
+      (match w.resource with
+       | Some r -> Webui_resource.release r
+       | None -> ())
+  | None -> ()
+
 let spawn ~name ~argv ?(restart = Never)
-    ?(on_notification = fun _ -> ()) ?trace () =
+    ?(on_notification = fun _ -> ()) ?trace ?(scope = Webui_resource.App) () =
   match argv with
   | [] -> Error (Spawn_failed "empty argv")
   | prog :: _ -> (
@@ -258,6 +287,7 @@ let spawn ~name ~argv ?(restart = Never)
           status = Alive;
           restart_count = 0;
           next_id = 1;
+          resource = None;
         }
       in
       match spawn_proc w with
@@ -265,12 +295,14 @@ let spawn ~name ~argv ?(restart = Never)
       | Ok p ->
           w.proc <- Some p;
           emit w ~name:"worker_spawned" [ ("pid", `Int p.pid) ];
+          w.resource <-
+            Some
+              (Webui_resource.register ~kind:"worker" ~name ~scope
+                 ~release:(fun () -> if is_alive w then kill w)
+                 ());
           Registry.add w;
           let (_ : unit Domain.t) = Domain.spawn (fun () -> reader_loop w p) in
           Ok w)
-
-let is_alive w =
-  Mutex.protect w.mutex (fun () -> w.status = Alive && w.proc <> None)
 
 let status w = Mutex.protect w.mutex (fun () -> w.status)
 
@@ -385,24 +417,5 @@ let request w ?(trace_id = "") ?timeout_ms ?token ~method_ params =
               poll ()
         in
         poll ()
-
-let kill w =
-  let target =
-    Mutex.protect w.mutex (fun () ->
-        if w.status = Killed then None
-        else (
-          w.status <- Killed;
-          let failed = fail_all_pending w Worker_killed in
-          Registry.remove w;
-          match w.proc with
-          | Some p -> Some (p.pid, failed)
-          | None -> None))
-  in
-  match target with
-  | Some (pid_, failed) ->
-      emit w ~name:"worker_killed"
-        [ ("pid", `Int pid_); ("pending_failed", `Int failed) ];
-      terminate pid_
-  | None -> ()
 
 let shutdown_all () = List.iter kill (Registry.snapshot ())

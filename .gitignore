@@ -11,3 +11,5 @@ node_modules/
 # Local tool configs
 .claude/settings.local.json
 .opencode/node_modules/
+.claude/
+.opencode/

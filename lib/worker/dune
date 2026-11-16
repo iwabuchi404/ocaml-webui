@@ -1,4 +1,4 @@
 (library
  (name webui_worker)
  (public_name ocaml-webui.worker)
- (libraries unix yojson ocaml-webui.async ocaml-webui.trace))
+ (libraries unix yojson ocaml-webui.async ocaml-webui.resource ocaml-webui.trace))

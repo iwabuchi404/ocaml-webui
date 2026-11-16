@@ -1,0 +1,6 @@
+(test
+ (name resource_test)
+ (modules resource_test)
+ (deps ../worker/echo_worker.exe)
+ (libraries unix yojson ocaml-webui.raw ocaml-webui.resource ocaml-webui.trace
+   ocaml-webui.worker))

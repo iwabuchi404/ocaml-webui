@@ -111,7 +111,31 @@ module Window = struct
     of_native_result Error.Request_close
       (Webui_raw_native.request_close window)
 
+  let teardown_mutex = Mutex.create ()
+  let teardown_callbacks : (t * (unit -> unit) list) list ref = ref []
+
+  let on_destroy window callback =
+    Mutex.protect teardown_mutex (fun () ->
+        let rec upd = function
+          | [] -> [ (window, [ callback ]) ]
+          | (w, cbs) :: rest ->
+              if w == window then (w, callback :: cbs) :: rest
+              else (w, cbs) :: upd rest
+        in
+        teardown_callbacks := upd !teardown_callbacks)
+
   let destroy window =
+    let cbs =
+      Mutex.protect teardown_mutex (fun () ->
+          let found, rest =
+            List.partition (fun (w, _) -> w == window) !teardown_callbacks
+          in
+          teardown_callbacks := rest;
+          match found with
+          | [ (_, cbs) ] -> List.rev cbs
+          | _ -> [])
+    in
+    List.iter (fun cb -> try cb () with _ -> ()) cbs;
     of_native_result Error.Destroy (Webui_raw_native.destroy window)
 
   let with_window config callback =

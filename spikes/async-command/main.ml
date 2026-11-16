@@ -255,6 +255,14 @@ let run_close_phase () =
     install_bridge phase ~trace:trace_sink
       [ Bridge.pack (analyze_command phase ~name:"async.analyze" ()) ]
   in
+  (* Window-scoped resource must release itself during Window.destroy. *)
+  let window_released = Atomic.make false in
+  let _window_resource =
+    Webui_resource.register ~kind:"test" ~name:"window-scoped"
+      ~scope:(Webui_resource.Window phase.window)
+      ~release:(fun () -> Atomic.set window_released true)
+      ()
+  in
   require (Webui_raw.Window.set_html phase.window close_html);
   let closer =
     Thread.create
@@ -283,7 +291,9 @@ let run_close_phase () =
   let snapshot = trace_snapshot () in
   expect_events "close" snapshot "request-close"
     [ "invoke_received"; "handler_started"; "handler_completed" ];
-  assert_clean_destroy phase 1
+  assert_clean_destroy phase 1;
+  if not (Atomic.get window_released) then
+    failwith "window-scoped resource was not released on Window.destroy"
 
 let () =
   Printexc.record_backtrace true;

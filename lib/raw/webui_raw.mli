@@ -58,6 +58,12 @@ module Window : sig
       future dispatch/Call operations, that may be called from a worker Domain. *)
   val request_close : t -> (unit, Error.t) result
 
+  val on_destroy : t -> (unit -> unit) -> unit
+  (** Registers [callback] to run once during {!destroy}, before the native
+      teardown, on the calling (owner) thread. Callback exceptions are
+      swallowed. Used by the resource layer to revoke window-scoped
+      resources. *)
+
   (** Explicitly destroys the native WebView. Must run on the owner thread in
       [Created] or [Stopped]. Calling it again after success is harmless. *)
   val destroy : t -> (unit, Error.t) result

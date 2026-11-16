@@ -45,10 +45,16 @@ val spawn :
   ?restart:restart_policy ->
   ?on_notification:(Yojson.Safe.t -> unit) ->
   ?trace:Webui_trace.sink ->
+  ?scope:Webui_resource.scope ->
   unit ->
   (worker, error) result
 (** Spawns [argv] directly (no shell). [argv.0] is the program, searched in
-    PATH. The reader domain starts immediately. Emits [worker_spawned]. *)
+    PATH. The reader domain starts immediately. Emits [worker_spawned].
+
+    The worker registers itself as a [Webui_resource] of kind ["worker"]
+    under [scope] (default [App]), so {!Webui_resource.revoke_scope}
+    terminates it alongside the rest of the scope. A killed or dead
+    worker releases its resource automatically. *)
 
 val request :
   worker ->
