@@ -1,0 +1,10 @@
+(executable
+ (name echo_worker)
+ (modules echo_worker)
+ (libraries unix yojson))
+
+(test
+ (name worker_test)
+ (modules worker_test)
+ (deps ./echo_worker.exe)
+ (libraries unix yojson ocaml-webui.trace ocaml-webui.worker))
