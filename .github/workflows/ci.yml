@@ -21,6 +21,11 @@ jobs:
         with:
           ocaml-compiler: "5.4.1"
           dune-cache: true
+          # Restoring a stale internal Cygwin root makes depext
+          # installs via setup-x86_64 --upgrade-also fail
+          # intermittently (setup-ocaml#1102). Bumping the prefix
+          # forces a fresh cache when this recurs.
+          cache-prefix: "v4-20261116-setup-ocaml"
 
       - name: Install OCaml dependencies
         shell: bash
