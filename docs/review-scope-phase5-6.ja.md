@@ -56,14 +56,27 @@
 ## 検証状況
 
 - `test/resource/resource_test.exe`: 20 checks全pass
-- `test/worker/worker_test.exe`: 31 checks全pass（Windows実機でTerminateProcess・restart確認）
+- `test/worker/worker_test.exe`: 38 checks全pass（Windows実機でTerminateProcess・restart確認）
 - `spikes/async-command/main.exe`: 実機WebView2でwindow-scope resourceのdestroy時release確認
 - `D:/work/ai-usage-monitor`: `AIM_AUTOCLOSE_MS=20000` で起動→auto-refresh→codex worker spawn（`app-server --stdio`）→auto-close→destroy経由でkill、孤児プロセスなし
-- CI: Windows + Linux 両ジョブ green（最新 run `44079210059`）
+- CI: Windows + Linux 両ジョブ green（最新 run `44126918304` / `108498a`）
 
 ## レビュー時の着眼点（想定問い合わせ）
 
 - resource release中の再入（release fnがregister/releaseを呼ぶ）の安全性 — mutex外実行で設計済みだが実装確認値あり
-- `Window.on_destroy`のcallbackがnative destroy前に走る順序が、resource cleanupがwindow APIを使うケース（今後のBinding resource化等）で正しいか
+- `Window.on_destroy`のcallbackがnative destroy成功後に走る順序で、resource cleanupがwindow APIを使うケース（今後のBinding resource化等）に問題がないか
 - reader domainのEOF検知から `Stop`/`Restart` 分岐でresource releaseのタイミングが正しいか（`Stop`時のみrelease、`Restart`ではresourceを保持）
 - `shutdown_all`の「全worker kill → revoke_scope App」の順序で、App-scope以外のworkerがrevokeされないまま残るパスがないか
+
+## レビュー指摘と対応（`6f18ee5` / `108498a` で対応済み）
+
+外部レビューで4件指摘され、すべて修正済み:
+
+1. **[P1] 同時リクエストでNDJSON破損** — requester各々が`p.oc`へ直接書いていた。requesterはframeをキューへenqueueするだけにし、専用writer Domainを唯一のstdin writerとした（`send_mutex`/`send_cond`/`send_queue`）。回帰テスト: 8 Domain×20件×4096B padding。
+2. **[P1] 送信ブロック中にtimeout/cancelが効かない** — 同期書込みがdeadline設定より前だった。enqueue後にdeadlineを立てrequesterは`pending.result`をpollするだけなので、writerがブロックしていてもtimeout/cancelで待機解除される。dequeue後・書込み前にpending在籍を確認し、除去済みなら送信をスキップ。回帰テスト: 1MiB要求がtimeout_ms:100で1秒以内に`Timeout`返却。
+3. **[P2] 自然終了後のプロセス参照残留と Dead→Killed 遷移** — `w.proc == Some p`はoptionブロックの物理比較で常にfalseだった。`Some cur when cur == p`で含まれるrecord同士を比較し、自然終了時に`w.proc <- None`。`kill`は`Alive`のみ`Killed`へ遷移し、`Dead`/`Killed`はno-op（terminateも呼ばない）。terminate前に`waitpid [WNOHANG]`でreap済み確認をベストエフォート実行。回帰テスト: `die`後に`pid=None`・`is_alive=false`・`kill`後も`Dead`維持。
+4. **[P2] 拒否されたdestroyでresource解放** — `Window.destroy`がnative検証前にcallbackを取り出して実行していた。native destroyを先に呼び、`Ok ()`のときだけcallbackを取り出して実行（owner thread上・成功後）。失敗時はcallback登録のまま残る。
+
+5. **発生したCI障害と再修正** — writer Domainは「requesterのDomainでない場所」でstdinへ書くため、worker死亡後のwriteでPOSIX `EPIPE`+`SIGPIPE`が発生しプロセス全体が死んだ（Linux CIで`worker_test`がsignal PIPE終了。WindowsはEPIPE例外のみで検出されず）。`spawn`時に`Sys.set_signal Sys.sigpipe Sys.Signal_ignore`を1回設定し、writer側では`Sys_error`として`Worker_exited`に変換されるようにした（`108498a`）。
+
+修正後の検証: `worker_test` 38 checks / `resource_test` 20 checks 全pass、`dune runtest`全green、async bridge実機probe全pass、Usage Monitor codex probe正常終了。CI run `44126918304`（`108498a`）でWindows+Linux両green。
