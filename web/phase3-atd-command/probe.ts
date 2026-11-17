@@ -69,7 +69,7 @@ export async function runProbe(): Promise<void> {
       protocol: 1,
       requestId: "request-malformed",
       traceId: "trace-malformed",
-      command: "text.analyze",
+      command: textAnalyze.name,
       payload: { text: 123, delayMs: 50 },
     });
     throw new Error("malformed payload unexpectedly resolved");
@@ -86,7 +86,7 @@ export async function runProbe(): Promise<void> {
       protocol: 1,
       requestId: "request-handler-error",
       traceId: "trace-handler-error",
-      command: "text.analyze",
+      command: textAnalyze.name,
       payload: { text: "handler error", delayMs: 0 },
     });
     throw new Error("handler exception unexpectedly resolved");
@@ -103,7 +103,7 @@ export async function runProbe(): Promise<void> {
       protocol: 1,
       requestId: "request-handler-exit",
       traceId: "trace-handler-exit",
-      command: "text.analyze",
+      command: textAnalyze.name,
       payload: { text: "exit test", delayMs: 0 },
     });
     throw new Error("handler exit unexpectedly resolved");

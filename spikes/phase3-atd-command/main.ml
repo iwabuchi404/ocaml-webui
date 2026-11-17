@@ -61,8 +61,10 @@ let join_workers phase =
   in
   List.iter Domain.join workers
 
+let text_analyze_name = "text.analyze"
+
 let analyze_command phase =
-  Bridge.define text_analyze_codec ~name:"text.analyze"
+  Bridge.define text_analyze_codec ~name:text_analyze_name
     (fun context request responder ->
       if context.request_id = "request-handler-error" then
         failwith "intentional ATD bridge handler failure"
@@ -245,14 +247,16 @@ let run_success_phase () =
   assert_clean_destroy phase 2
 
 let cancel_html =
-  {html|<!doctype html><meta charset="utf-8"><title>ATD bridge cancel</title>
+  Printf.sprintf
+    {html|<!doctype html><meta charset="utf-8"><title>ATD bridge cancel</title>
 <script>
 ocamlWebui.invoke(
-  "text.analyze",
+  %S,
   { text: "close while pending", delayMs: 750 },
   { requestId: "request-cancel", traceId: "trace-cancel" }
 ).catch(() => {});
 </script>|html}
+    text_analyze_name
 
 let run_cancel_phase () =
   let phase = create_phase () in

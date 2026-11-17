@@ -113,7 +113,7 @@ async function runProbe(): Promise<void> {
   // 5. JS-side timeoutMs on the untyped ocamlWebui.invokeHandle —
   //    client-side reject with category "timeout" plus a cancel to OCaml.
   const raw = (globalThis as any).ocamlWebui.invokeHandle(
-    "async.analyze",
+    asyncAnalyze.name,
     { text: "x", delayMs: 1500 },
     {
       requestId: "request-js-timeout",

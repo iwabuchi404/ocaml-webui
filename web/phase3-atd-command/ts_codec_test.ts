@@ -180,7 +180,7 @@ expectThrow(() => readEchoError({ code: "unknown", message: "x", retryable: fals
       protocol: 1,
       requestId: "test-proto",
       traceId: "test-proto",
-      command: "text.analyze",
+      command: textAnalyze.name,
       ok: false,
       error: { code: "invalid_payload", message: "payload decode failed", retryable: false, category: "protocol" },
     };
@@ -201,7 +201,7 @@ expectThrow(() => readEchoError({ code: "unknown", message: "x", retryable: fals
       protocol: 1,
       requestId: "test-app",
       traceId: "test-app",
-      command: "text.analyze",
+      command: textAnalyze.name,
       ok: false,
       error: { code: "empty_text", message: "text must not be empty", retryable: false, category: "validation" },
     };
@@ -222,7 +222,7 @@ expectThrow(() => readEchoError({ code: "unknown", message: "x", retryable: fals
       protocol: 1,
       requestId: "test-internal",
       traceId: "test-internal",
-      command: "text.analyze",
+      command: textAnalyze.name,
       ok: false,
       error: { code: "internal_error", message: "command handler raised", retryable: false, category: "internal" },
     };

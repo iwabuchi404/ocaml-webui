@@ -64,6 +64,9 @@ let find_submission phase request_id =
   Mutex.protect phase.submissions_lock (fun () ->
       Hashtbl.find_opt phase.submissions request_id)
 
+let analyze_name = "async.analyze"
+let slow_name = "async.slow"
+
 (* Async handler: sleeps in 10ms steps, polling the cooperative token.
    On cancellation it records the observed reason and returns without
    responding — the request is already rejected by the cancel/timeout path,
@@ -155,9 +158,9 @@ let run_interactive_phase () =
   let bridge =
     install_bridge phase ~trace:trace_sink
       [
-        Bridge.pack (analyze_command phase ~name:"async.analyze" ());
+        Bridge.pack (analyze_command phase ~name:analyze_name ());
         Bridge.pack
-          (analyze_command phase ~name:"async.slow" ~timeout_ms:400 ());
+          (analyze_command phase ~name:slow_name ~timeout_ms:400 ());
       ]
   in
   let report_binding =
@@ -238,14 +241,16 @@ let run_interactive_phase () =
   assert_clean_destroy phase 2
 
 let close_html =
-  {html|<!doctype html><meta charset="utf-8"><title>async close</title>
+  Printf.sprintf
+    {html|<!doctype html><meta charset="utf-8"><title>async close</title>
 <script>
 ocamlWebui.invoke(
-  "async.analyze",
+  %S,
   { text: "close while pending", delayMs: 2000 },
   { requestId: "request-close", traceId: "trace-close" }
 ).catch(() => {});
 </script>|html}
+    analyze_name
 
 let run_close_phase () =
   let phase = create_phase () in
@@ -253,7 +258,7 @@ let run_close_phase () =
   let trace_sink, trace_snapshot = Webui_trace.ring_buffer ~capacity:64 in
   let bridge =
     install_bridge phase ~trace:trace_sink
-      [ Bridge.pack (analyze_command phase ~name:"async.analyze" ()) ]
+      [ Bridge.pack (analyze_command phase ~name:analyze_name ()) ]
   in
   (* Window-scoped resource must release itself during Window.destroy. *)
   let window_released = Atomic.make false in
