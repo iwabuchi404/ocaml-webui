@@ -362,6 +362,11 @@ let kill w =
 
 let spawn ~name ~argv ?(restart = Never)
     ?(on_notification = fun _ -> ()) ?trace ?(scope = Webui_resource.App) () =
+  (* POSIX: a write to a dead worker's stdin raises EPIPE, and the
+     default SIGPIPE disposition would kill the whole process. Ignore it
+     once so the writer domain sees a Sys_error it can report as
+     Worker_exited instead. Harmless on Windows. *)
+  (try Sys.set_signal Sys.sigpipe Sys.Signal_ignore with _ -> ());
   match argv with
   | [] -> Error (Spawn_failed "empty argv")
   | prog :: _ -> (
