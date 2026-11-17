@@ -23,6 +23,10 @@ type pending = {
   mutable result : (Yojson.Safe.t, error) result option;
   trace_id : string;
   started_at : float;
+  (* Shared with the queued send item: clearing it releases the frame
+     payload even while the writer domain is blocked, so timed-out or
+     cancelled requests cannot pin megabytes in [send_queue]. *)
+  frame : string option ref;
 }
 
 type worker = {
@@ -45,7 +49,7 @@ type worker = {
      while the frame still waits in [send_queue]. *)
   send_mutex : Mutex.t;
   send_cond : Condition.t;
-  send_queue : (int * string * pending) Queue.t;
+  send_queue : (int * pending) Queue.t;
   mutable send_terminated : bool;
 }
 
@@ -76,7 +80,11 @@ let terminate pid =
    returns how many were failed. *)
 let fail_all_pending w err =
   let n = Hashtbl.length w.pending in
-  Hashtbl.iter (fun _ p -> p.result <- Some (Error err)) w.pending;
+  Hashtbl.iter
+    (fun _ p ->
+      p.frame := None;
+      p.result <- Some (Error err))
+    w.pending;
   Hashtbl.clear w.pending;
   n
 
@@ -119,6 +127,7 @@ let deliver w id fields =
         match Hashtbl.find_opt w.pending id with
         | Some p ->
             let r = result_of_fields fields in
+            p.frame := None;
             p.result <- Some r;
             Hashtbl.remove w.pending id;
             Some (p, r)
@@ -249,11 +258,13 @@ and on_eof w p =
        | Some r -> Webui_resource.release r
        | None -> ())
 
-(* Signals the writer domain to drain and exit. Queued frames are
-   skipped because their pending entries are already failed. *)
+(* Signals the writer domain to drain and exit. Also drops every queued
+   frame payload so a dead worker cannot retain large request strings. *)
 and stop_writer w =
   Mutex.protect w.send_mutex (fun () ->
       w.send_terminated <- true;
+      Queue.iter (fun (_, pended) -> pended.frame := None) w.send_queue;
+      Queue.clear w.send_queue;
       Condition.broadcast w.send_cond)
 
 (* Sole writer of the worker's stdin: takes frames in queue order,
@@ -277,16 +288,17 @@ and writer_loop w =
   in
   match item with
   | `Done -> ()
-  | `Item (id, msg, pended) -> (
+  | `Item (id, pended) -> (
       let live =
         Mutex.protect w.mutex (fun () ->
-            match Hashtbl.find_opt w.pending id with
-            | None -> `Skip
-            | Some _ -> (
+            match (Hashtbl.find_opt w.pending id, !(pended.frame)) with
+            | None, _ | _, None -> `Skip
+            | Some _, Some msg -> (
                 match (w.status, w.proc) with
-                | Alive, Some p -> `Write p
+                | Alive, Some p -> `Write (p, msg)
                 | _ ->
                     Hashtbl.remove w.pending id;
+                    pended.frame := None;
                     pended.result <-
                       Some
                         (Error
@@ -297,7 +309,7 @@ and writer_loop w =
       in
       (match live with
        | `Skip -> ()
-       | `Write p ->
+       | `Write (p, msg) ->
            let ok =
              (try
                 output_string p.oc msg;
@@ -306,8 +318,9 @@ and writer_loop w =
                 true
               with _ -> false)
            in
-           if not ok then
-             Mutex.protect w.mutex (fun () ->
+           Mutex.protect w.mutex (fun () ->
+               pended.frame := None;
+               if not ok then
                  match Hashtbl.find_opt w.pending id with
                  | Some _ ->
                      Hashtbl.remove w.pending id;
@@ -429,6 +442,7 @@ let request w ?(trace_id = "") ?timeout_ms ?token ~method_ params =
                 result = None;
                 trace_id;
                 started_at = Unix.gettimeofday ();
+                frame = ref None;
               }
             in
             Hashtbl.replace w.pending id pended;
@@ -453,7 +467,8 @@ let request w ?(trace_id = "") ?timeout_ms ?token ~method_ params =
          this never blocks on I/O. A blocked writer cannot prevent the
          poll loop below from observing cancel/timeout. *)
       Mutex.protect w.send_mutex (fun () ->
-          Queue.push (id, msg, pended) w.send_queue;
+          pended.frame := Some msg;
+          Queue.push (id, pended) w.send_queue;
           Condition.signal w.send_cond);
       emit w ~trace_id ~request_id:(string_of_int id)
         ~name:"worker_request"
@@ -476,9 +491,11 @@ let request w ?(trace_id = "") ?timeout_ms ?token ~method_ params =
               | None ->
                   if token_cancelled () then (
                     Hashtbl.remove w.pending id;
+                    pended.frame := None;
                     `Cancelled_tok)
                   else if Unix.gettimeofday () >= deadline then (
                     Hashtbl.remove w.pending id;
+                    pended.frame := None;
                     `Timed_out)
                   else `Wait)
         with

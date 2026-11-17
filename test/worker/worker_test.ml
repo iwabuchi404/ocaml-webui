@@ -244,6 +244,49 @@ let test_dead_worker_invariants () =
   W.kill w;
   check "kill leaves Dead" (W.status w = W.Dead)
 
+let test_timed_out_frames_released () =
+  (* Regression: a timed-out request must release its queued frame
+     payload. With a worker that never reads stdin the writer stays
+     blocked on the first frame; without the shared [frame] ref the
+     remaining ~59 MB stayed reachable after GC. *)
+  let w =
+    match W.spawn ~name:"noread" ~argv:(echo_argv @ [ "--noread" ]) () with
+    | Ok w -> w
+    | Error _ ->
+        incr failures;
+        failwith "spawn failed"
+  in
+  let big () = `Assoc [ ("pad", `String (String.make (1024 * 1024) 'x')) ] in
+  Gc.compact ();
+  let before = (Gc.stat ()).Gc.live_words in
+  let timeouts = ref 0 in
+  let other = ref None in
+  for _ = 1 to 60 do
+    match W.request w ~method_:"echo" ~timeout_ms:50 (big ()) with
+    | Error W.Timeout -> incr timeouts
+    | r -> other := Some r
+  done;
+  (match !other with
+   | Some (Ok _) -> print_endline "  non-timeout result: ok"
+   | Some (Error e) ->
+       Printf.printf "  non-timeout error constructor index: %d\n"
+         (match e with
+          | W.Spawn_failed _ -> 0
+          | W.Worker_exited -> 1
+          | W.Worker_killed -> 2
+          | W.Worker_dead -> 3
+          | W.Timeout -> 4
+          | W.Cancelled -> 5
+          | W.Remote_error _ -> 6
+          | W.Protocol_error _ -> 7)
+   | None -> ());
+  Gc.compact ();
+  let grown = (Gc.stat ()).Gc.live_words - before in
+  check "all requests timed out" (!timeouts = 60);
+  check "pending drained" (W.pending_count w = 0);
+  check "queued payloads released" (grown < 1024 * 1024);
+  W.kill w
+
 let test_shutdown_all () =
   let w1 = expect_ok "sa1" in
   let w2 = expect_ok "sa2" in
@@ -286,10 +329,11 @@ let () =
   test_concurrent_sends ();
   test_queued_request_times_out ();
   test_dead_worker_invariants ();
+  test_timed_out_frames_released ();
   test_shutdown_all ();
   test_trace ();
   if !failures = 0 then
-    print_endline "worker_test: passed (echo timeout kill restart limit notify cancel queue deadstate trace)"
+    print_endline "worker_test: passed (echo timeout kill restart limit notify cancel queue deadstate gc trace)"
   else begin
     Printf.printf "worker_test: %d failures\n" !failures;
     exit 1

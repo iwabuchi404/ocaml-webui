@@ -56,7 +56,7 @@
 ## 検証状況
 
 - `test/resource/resource_test.exe`: 20 checks全pass
-- `test/worker/worker_test.exe`: 38 checks全pass（Windows実機でTerminateProcess・restart確認）
+- `test/worker/worker_test.exe`: 41 checks全pass（Windows実機でTerminateProcess・restart確認）
 - `spikes/async-command/main.exe`: 実機WebView2でwindow-scope resourceのdestroy時release確認
 - `D:/work/ai-usage-monitor`: `AIM_AUTOCLOSE_MS=20000` で起動→auto-refresh→codex worker spawn（`app-server --stdio`）→auto-close→destroy経由でkill、孤児プロセスなし
 - CI: Windows + Linux 両ジョブ green（最新 run `44126918304` / `108498a`）
@@ -78,5 +78,6 @@
 4. **[P2] 拒否されたdestroyでresource解放** — `Window.destroy`がnative検証前にcallbackを取り出して実行していた。native destroyを先に呼び、`Ok ()`のときだけcallbackを取り出して実行（owner thread上・成功後）。失敗時はcallback登録のまま残る。
 
 5. **発生したCI障害と再修正** — writer Domainは「requesterのDomainでない場所」でstdinへ書くため、worker死亡後のwriteでPOSIX `EPIPE`+`SIGPIPE`が発生しプロセス全体が死んだ（Linux CIで`worker_test`がsignal PIPE終了。WindowsはEPIPE例外のみで検出されず）。`spawn`時に`Sys.set_signal Sys.sigpipe Sys.Signal_ignore`を1回設定し、writer側では`Sys_error`として`Worker_exited`に変換されるようにした（`108498a`）。
+6. **[P2] タイムアウト済み要求が送信キューに残りメモリ増大** — timeout/cancelがpendingのみ削除していたため、writerブロック中にキュー内JSON文字列が滞留した（1MiB×60件で約60MB残留を再現）。`pending.frame : string option ref`をキュー項目と共有し、pending削除の全経路（timeout/cancel/deliver/fail_all_pending/書込後）で`frame := None`にしてペイロードを解放。`stop_writer`もキューをドレインして各frameを解放。回帰テスト: stdin非読みworkerへ60×1MiB要求を全件タイムアウトさせ、GC.compact後のlive_words増分が1M語未満であることを確認（`worker_test` 41 checks）。
 
-修正後の検証: `worker_test` 38 checks / `resource_test` 20 checks 全pass、`dune runtest`全green、async bridge実機probe全pass、Usage Monitor codex probe正常終了。CI run `44126918304`（`108498a`）でWindows+Linux両green。
+修正後の検証: `worker_test` 41 checks / `resource_test` 20 checks 全pass、`dune runtest`全green、async bridge実機probe全pass、Usage Monitor codex probe正常終了。CI run `44126918304`（`108498a`）でWindows+Linux両green。
