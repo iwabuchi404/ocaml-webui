@@ -39,6 +39,14 @@ type worker = {
   mutable restart_count : int;
   mutable next_id : int;
   mutable resource : Webui_resource.resource option;
+  (* Outbound NDJSON frames are serialised through a dedicated writer
+     domain so concurrent requesters cannot interleave bytes and so a
+     blocked write never blocks the requester: cancel/timeout detach
+     while the frame still waits in [send_queue]. *)
+  send_mutex : Mutex.t;
+  send_cond : Condition.t;
+  send_queue : (int * string * pending) Queue.t;
+  mutable send_terminated : bool;
 }
 
 let emit w ?(trace_id = "") ?(request_id = "") ~name data =
@@ -52,9 +60,17 @@ let emit w ?(trace_id = "") ?(request_id = "") ~name data =
 
 (* Force-terminates a process. On Windows [Unix.kill ... sigkill] maps to
    TerminateProcess on the process handle returned by open_process_args;
-   on POSIX it is SIGKILL. Best effort: a stale handle is ignored. *)
+   on POSIX it is SIGKILL. A WNOHANG reap check narrows the window where
+   the pid/handle could already have exited and been recycled. *)
 let terminate pid =
-  try Unix.kill pid Sys.sigkill with _ -> ()
+  let exited =
+    match
+      (try Some (Unix.waitpid [ Unix.WNOHANG ] pid) with _ -> None)
+    with
+    | Some (reaped, _) when reaped = pid -> true
+    | _ -> false
+  in
+  if not exited then (try Unix.kill pid Sys.sigkill with _ -> ())
 
 (* All callers hold [w.mutex]. Marks every pending request as failed and
    returns how many were failed. *)
@@ -167,7 +183,11 @@ and on_eof w p =
   let events, next =
     Mutex.protect w.mutex (fun () ->
         let intentional = w.status = Killed in
-        if w.proc == Some p then w.proc <- None;
+        (* Physical comparison on the proc record: [w.proc == Some p]
+           always fails because [Some p] is a fresh block. *)
+        (match w.proc with
+         | Some cur when cur == p -> w.proc <- None
+         | _ -> ());
         let failed =
           fail_all_pending w
             (if intentional then Worker_killed else Worker_exited)
@@ -223,10 +243,77 @@ and on_eof w p =
   List.iter (fun (name, data) -> emit w ~name data) events;
   match next with
   | `Restart np -> reader_loop w np
-  | `Stop -> (
-      match w.resource with
-      | Some r -> Webui_resource.release r
-      | None -> ())
+  | `Stop ->
+      stop_writer w;
+      (match w.resource with
+       | Some r -> Webui_resource.release r
+       | None -> ())
+
+(* Signals the writer domain to drain and exit. Queued frames are
+   skipped because their pending entries are already failed. *)
+and stop_writer w =
+  Mutex.protect w.send_mutex (fun () ->
+      w.send_terminated <- true;
+      Condition.broadcast w.send_cond)
+
+(* Sole writer of the worker's stdin: takes frames in queue order,
+   writes each as one flush. Frames whose pending entry is gone
+   (cancelled / timed out / failed) are skipped — so a detached request
+   never reaches the wire. A blocked write only blocks this domain;
+   requesters still observe cancel/timeout while queued. *)
+and writer_loop w =
+  let item =
+    Mutex.protect w.send_mutex (fun () ->
+        let rec take () =
+          match Queue.take_opt w.send_queue with
+          | Some x -> `Item x
+          | None ->
+              if w.send_terminated then `Done
+              else (
+                Condition.wait w.send_cond w.send_mutex;
+                take ())
+        in
+        take ())
+  in
+  match item with
+  | `Done -> ()
+  | `Item (id, msg, pended) -> (
+      let live =
+        Mutex.protect w.mutex (fun () ->
+            match Hashtbl.find_opt w.pending id with
+            | None -> `Skip
+            | Some _ -> (
+                match (w.status, w.proc) with
+                | Alive, Some p -> `Write p
+                | _ ->
+                    Hashtbl.remove w.pending id;
+                    pended.result <-
+                      Some
+                        (Error
+                           (match w.status with
+                            | Killed -> Worker_killed
+                            | _ -> Worker_dead));
+                    `Skip))
+      in
+      (match live with
+       | `Skip -> ()
+       | `Write p ->
+           let ok =
+             (try
+                output_string p.oc msg;
+                output_char p.oc '\n';
+                flush p.oc;
+                true
+              with _ -> false)
+           in
+           if not ok then
+             Mutex.protect w.mutex (fun () ->
+                 match Hashtbl.find_opt w.pending id with
+                 | Some _ ->
+                     Hashtbl.remove w.pending id;
+                     pended.result <- Some (Error Worker_exited)
+                 | None -> ()));
+      writer_loop w)
 
 (* Flat registry backing [shutdown_all]; entries are pruned lazily. *)
 module Registry = struct
@@ -246,26 +333,31 @@ end
 let is_alive w =
   Mutex.protect w.mutex (fun () -> w.status = Alive && w.proc <> None)
 
+(* Transitions Alive -> Killed and terminates the process. A Dead or
+   already-Killed worker is only detached: status is left untouched, no
+   terminate is attempted on an exited process. *)
 let kill w =
-  let target =
+  let action =
     Mutex.protect w.mutex (fun () ->
-        if w.status = Killed then None
-        else (
-          w.status <- Killed;
-          let failed = fail_all_pending w Worker_killed in
-          Registry.remove w;
-          match w.proc with
-          | Some p -> Some (p.pid, failed)
-          | None -> None))
+        Registry.remove w;
+        match w.status with
+        | Alive ->
+            w.status <- Killed;
+            let failed = fail_all_pending w Worker_killed in
+            (match w.proc with
+             | Some p -> `Kill (p.pid, failed)
+             | None -> `Detach)
+        | _ -> `Detach)
   in
-  match target with
-  | Some (pid_, failed) ->
-      emit w ~name:"worker_killed"
-        [ ("pid", `Int pid_); ("pending_failed", `Int failed) ];
-      terminate pid_;
-      (match w.resource with
-       | Some r -> Webui_resource.release r
-       | None -> ())
+  stop_writer w;
+  (match action with
+   | `Detach -> ()
+   | `Kill (pid_, failed) ->
+       emit w ~name:"worker_killed"
+         [ ("pid", `Int pid_); ("pending_failed", `Int failed) ];
+       terminate pid_);
+  match w.resource with
+  | Some r -> Webui_resource.release r
   | None -> ()
 
 let spawn ~name ~argv ?(restart = Never)
@@ -288,6 +380,10 @@ let spawn ~name ~argv ?(restart = Never)
           restart_count = 0;
           next_id = 1;
           resource = None;
+          send_mutex = Mutex.create ();
+          send_cond = Condition.create ();
+          send_queue = Queue.create ();
+          send_terminated = false;
         }
       in
       match spawn_proc w with
@@ -302,6 +398,7 @@ let spawn ~name ~argv ?(restart = Never)
                  ());
           Registry.add w;
           let (_ : unit Domain.t) = Domain.spawn (fun () -> reader_loop w p) in
+          let (_ : unit Domain.t) = Domain.spawn (fun () -> writer_loop w) in
           Ok w)
 
 let status w = Mutex.protect w.mutex (fun () -> w.status)
@@ -319,7 +416,7 @@ let request w ?(trace_id = "") ?timeout_ms ?token ~method_ params =
   let acquired =
     Mutex.protect w.mutex (fun () ->
         match w.proc, w.status with
-        | Some p, Alive ->
+        | Some _, Alive ->
             let id = w.next_id in
             w.next_id <- id + 1;
             let pended =
@@ -330,13 +427,13 @@ let request w ?(trace_id = "") ?timeout_ms ?token ~method_ params =
               }
             in
             Hashtbl.replace w.pending id pended;
-            `Acquired (p, id, pended)
+            `Acquired (id, pended)
         | _, Killed -> `Refused Worker_killed
         | _ -> `Refused Worker_dead)
   in
   match acquired with
   | `Refused e -> Error e
-  | `Acquired (p, id, pended) ->
+  | `Acquired (id, pended) ->
       let msg =
         Yojson.Safe.to_string
           (`Assoc
@@ -347,76 +444,62 @@ let request w ?(trace_id = "") ?timeout_ms ?token ~method_ params =
               ("params", params);
             ])
       in
-      let write_ok =
-        match
-          (try
-             output_string p.oc msg;
-             output_char p.oc '\n';
-             flush p.oc;
-             true
-           with _ -> false)
-      with
-      | false ->
-          Mutex.protect w.mutex (fun () ->
-              Hashtbl.remove w.pending id;
-              pended.result <- Some (Error Worker_exited));
-          false
-      | ok -> ok
+      (* Enqueue the frame and wait: the writer domain owns the wire, so
+         this never blocks on I/O. A blocked writer cannot prevent the
+         poll loop below from observing cancel/timeout. *)
+      Mutex.protect w.send_mutex (fun () ->
+          Queue.push (id, msg, pended) w.send_queue;
+          Condition.signal w.send_cond);
+      emit w ~trace_id ~request_id:(string_of_int id)
+        ~name:"worker_request"
+        [ ("method", `String method_); ("request_id", `Int id) ];
+      let deadline =
+        match timeout_ms with
+        | Some ms -> Unix.gettimeofday () +. (float_of_int ms /. 1000.)
+        | None -> Float.max_float
       in
-      if not write_ok then Error Worker_exited
-      else
-        let () =
-          emit w ~trace_id ~request_id:(string_of_int id)
-            ~name:"worker_request"
-            [ ("method", `String method_); ("request_id", `Int id) ]
-        in
-        let deadline =
-          match timeout_ms with
-          | Some ms -> Unix.gettimeofday () +. (float_of_int ms /. 1000.)
-          | None -> Float.max_float
-        in
-        let token_cancelled () =
-          match token with
-          | Some t -> Webui_async.is_cancelled t
-          | None -> false
-        in
-        let rec poll () =
-          match
-            Mutex.protect w.mutex (fun () ->
-                match pended.result with
-                | Some r -> `Done r
-                | None ->
-                    if token_cancelled () then (
-                      Hashtbl.remove w.pending id;
-                      `Cancelled_tok)
-                    else if Unix.gettimeofday () >= deadline then (
-                      Hashtbl.remove w.pending id;
-                      `Timed_out)
-                    else `Wait)
-          with
-          | `Done r -> r
-          | `Cancelled_tok ->
-              emit w ~trace_id ~request_id:(string_of_int id)
-                ~name:"worker_request_cancelled"
-                [ ("method", `String method_); ("request_id", `Int id) ];
-              Error Cancelled
-          | `Timed_out ->
-              emit w ~trace_id ~request_id:(string_of_int id)
-                ~name:"worker_timeout"
-                [
-                  ("method", `String method_);
-                  ("request_id", `Int id);
-                  ("timeout_ms",
-                    (match timeout_ms with
-                     | Some ms -> `Int ms
-                     | None -> `Null));
-                ];
-              Error Timeout
-          | `Wait ->
-              Unix.sleepf 0.005;
-              poll ()
-        in
-        poll ()
+      let token_cancelled () =
+        match token with
+        | Some t -> Webui_async.is_cancelled t
+        | None -> false
+      in
+      let rec poll () =
+        match
+          Mutex.protect w.mutex (fun () ->
+              match pended.result with
+              | Some r -> `Done r
+              | None ->
+                  if token_cancelled () then (
+                    Hashtbl.remove w.pending id;
+                    `Cancelled_tok)
+                  else if Unix.gettimeofday () >= deadline then (
+                    Hashtbl.remove w.pending id;
+                    `Timed_out)
+                  else `Wait)
+        with
+        | `Done r -> r
+        | `Cancelled_tok ->
+            emit w ~trace_id ~request_id:(string_of_int id)
+              ~name:"worker_request_cancelled"
+              [ ("method", `String method_); ("request_id", `Int id) ];
+            Error Cancelled
+        | `Timed_out ->
+            emit w ~trace_id ~request_id:(string_of_int id)
+              ~name:"worker_timeout"
+              [
+                ("method", `String method_);
+                ("request_id", `Int id);
+                ("timeout_ms",
+                  (match timeout_ms with
+                   | Some ms -> `Int ms
+                   | None -> `Null));
+              ];
+            Error Timeout
+        | `Wait ->
+            Unix.sleepf 0.005;
+            poll ()
+      in
+      poll ()
 
 (* Kills every live worker (any scope), then revokes the App scope so
    non-worker app resources registered via Webui_resource are released

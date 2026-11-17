@@ -181,6 +181,69 @@ let test_token_cancel () =
   check "post-cancel echo" (match r2 with Ok _ -> true | Error _ -> false);
   W.kill w
 
+let test_concurrent_sends () =
+  (* NDJSON integrity: concurrent requesters must not interleave bytes
+     on the wire — the writer domain serialises whole frames. *)
+  let w = expect_ok "concurrent" in
+  let ok = Atomic.make 0 in
+  let domains =
+    List.init 8 (fun i ->
+        Domain.spawn (fun () ->
+            for j = 1 to 20 do
+              let payload =
+                `Assoc
+                  [
+                    ("i", `Int i);
+                    ("j", `Int j);
+                    ("pad", `String (String.make 4096 'x'));
+                  ]
+              in
+              match W.request w ~method_:"echo" payload with
+              | Ok _ -> Atomic.incr ok
+              | Error _ -> ()
+            done))
+  in
+  List.iter Domain.join domains;
+  check "concurrent sends all ok" (Atomic.get ok = 160);
+  W.kill w
+
+let test_queued_request_times_out () =
+  (* A request stuck in the send queue behind a blocked write must still
+     observe its timeout: the writer owns the wire, the requester only
+     waits on its pending entry. *)
+  let w = expect_ok "sendqueue" in
+  let a =
+    Domain.spawn (fun () ->
+        W.request w ~method_:"sleep" (`Assoc [ ("ms", `Int 2000) ]))
+  in
+  (* Give the sleep frame time to reach the worker so it stops reading
+     stdin before the flood below is queued. *)
+  Unix.sleepf 0.1;
+  let big = `Assoc [ ("pad", `String (String.make (1024 * 1024) 'x')) ] in
+  let d =
+    Domain.spawn (fun () ->
+        W.request w ~method_:"echo" ~timeout_ms:100 big)
+  in
+  let t0 = Unix.gettimeofday () in
+  let r = Domain.join d in
+  let elapsed = Unix.gettimeofday () -. t0 in
+  check "queued request timed out" (r = Error W.Timeout);
+  check "timeout was prompt" (elapsed < 1.0);
+  ignore (Domain.join a);
+  W.kill w
+
+let test_dead_worker_invariants () =
+  (* After a natural exit the proc reference must be cleared: [pid] is
+     None, [is_alive] false, and [kill] must not flip Dead to Killed or
+     attempt terminate on an exited process. *)
+  let w = expect_ok "deadstate" in
+  ignore (W.request w ~method_:"die" `Null);
+  check "worker dead" (wait_until ~ms:3000 (fun () -> W.status w = W.Dead));
+  check "pid cleared" (W.pid w = None);
+  check "not alive" (not (W.is_alive w));
+  W.kill w;
+  check "kill leaves Dead" (W.status w = W.Dead)
+
 let test_shutdown_all () =
   let w1 = expect_ok "sa1" in
   let w2 = expect_ok "sa2" in
@@ -220,10 +283,13 @@ let () =
   test_restart_limit ();
   test_notification ();
   test_token_cancel ();
+  test_concurrent_sends ();
+  test_queued_request_times_out ();
+  test_dead_worker_invariants ();
   test_shutdown_all ();
   test_trace ();
   if !failures = 0 then
-    print_endline "worker_test: passed (echo timeout kill restart limit notify shutdown trace)"
+    print_endline "worker_test: passed (echo timeout kill restart limit notify cancel queue deadstate trace)"
   else begin
     Printf.printf "worker_test: %d failures\n" !failures;
     exit 1

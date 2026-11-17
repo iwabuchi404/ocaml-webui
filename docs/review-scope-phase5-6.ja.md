@@ -41,7 +41,7 @@
 - release関数は最大1回（registryが冪等保証）
 - `revoke_scope` は逆登録順・mutex外でrelease実行
 - worker kill・自然死どちらでもresourceが自動releaseされ、`Dead`のstatusを`Killed`へ汚さない
-- window-scope resourceはnative destroy**前**・owner thread上でrelease
+- window-scope resourceはnative destroy**成功後**・owner thread上でrelease（拒否されたdestroyではcallbackを消費しない）
 - `shutdown_all` はscope不問で全workerをkillする（後方互換）
 
 ## 既知の制限・open items（バグではなく記録済み仕様）

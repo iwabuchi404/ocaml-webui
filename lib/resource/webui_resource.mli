@@ -12,8 +12,8 @@
     - [Named s]: an application-defined group; useful for per-feature
       cleanup and tests.
     - [Window w]: released automatically when the window is destroyed via
-      [Webui_raw.Window.on_destroy]. The callback runs before native
-      teardown on the owner thread.
+      [Webui_raw.Window.on_destroy]. The callback runs after a successful
+      native teardown on the owner thread.
 
     [Webui_worker.spawn ~scope] registers workers automatically, so scope
     revocation kills them without extra wiring. *)

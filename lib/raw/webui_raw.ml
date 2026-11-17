@@ -125,18 +125,29 @@ module Window = struct
         teardown_callbacks := upd !teardown_callbacks)
 
   let destroy window =
-    let cbs =
-      Mutex.protect teardown_mutex (fun () ->
-          let found, rest =
-            List.partition (fun (w, _) -> w == window) !teardown_callbacks
-          in
-          teardown_callbacks := rest;
-          match found with
-          | [ (_, cbs) ] -> List.rev cbs
-          | _ -> [])
-    in
-    List.iter (fun cb -> try cb () with _ -> ()) cbs;
-    of_native_result Error.Destroy (Webui_raw_native.destroy window)
+    (* Teardown callbacks fire only after a successful native destroy:
+      a rejected call (wrong thread, wrong state) must not consume them
+      or release the resources they guard. On success they still run on
+      the calling thread, which the native layer has validated as the
+      owner thread. *)
+    match
+      of_native_result Error.Destroy (Webui_raw_native.destroy window)
+    with
+    | Error _ as e -> e
+    | Ok () ->
+        let cbs =
+          Mutex.protect teardown_mutex (fun () ->
+              let found, rest =
+                List.partition
+                  (fun (w, _) -> w == window) !teardown_callbacks
+              in
+              teardown_callbacks := rest;
+              match found with
+              | [ (_, cbs) ] -> List.rev cbs
+              | _ -> [])
+        in
+        List.iter (fun cb -> try cb () with _ -> ()) cbs;
+        Ok ()
 
   let with_window config callback =
     match create config with
