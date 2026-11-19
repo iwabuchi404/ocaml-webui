@@ -1,0 +1,10 @@
+(executable
+ (name exec_probe)
+ (modules exec_probe)
+ (libraries unix))
+
+(test
+ (name exec_test)
+ (modules exec_test)
+ (deps ./exec_probe.exe)
+ (libraries unix yojson ocaml-webui.async ocaml-webui.trace ocaml-webui.exec))

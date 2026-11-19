@@ -1,0 +1,4 @@
+(library
+ (name webui_exec)
+ (public_name ocaml-webui.exec)
+ (libraries unix ocaml-webui.async ocaml-webui.trace))
