@@ -158,3 +158,54 @@ Exec の次工程を、この計画で固定しない。
 - 公開 `?scope` と resource registry 統合、アプリ終了時の全 Exec 待ち合わせ
 - 共通 process 基盤の先行設計、pool、同時実行数制限
 - shell コマンド文字列 API（必要になった時点で別途設計する）
+
+## 検証結果と残った制限（2026-11-19、実装後追記）
+
+終了方式検証（`test/exec` として回帰テスト化済み、commit `0f5202e`）で
+以下が判明・確定した。
+
+### 確定した内部方式
+
+- **3 Domain + poller を採用**: stdin writer / stdout reader / stderr
+  reader + poller（唯一の reap 所有者、`waitpid [WNOHANG]` loop）。
+  `Unix.open_process_args_full` を使用。
+- **後始末は done flag ベースの有 bounded wait**: grace 0.5s で全
+  done flag が立てば join + `close_*_noerr` で channel を closed
+  マーク。**`Domain.join` には timeout がないため、flag 未完了の
+  domain は join しない**（lingering domain として返す）。
+- **grace 超過時**: POSIX は fd-level force close（`Unix.close` on
+  `descr_of_*`）で blocked な read/write を失敗させて unblock →
+  flag 完了後に channel close でマーク（GC finalizer の
+  double-close 回避）。**Windows は force close を行わない**。
+- **binary mode**: 3 channel 全て `set_binary_mode_*` — text mode の
+  CRLF 変換は byte-faithful な round trip を壊す（テストで検出）。
+
+### 発見したプラットフォーム差（重要）
+
+- **Windows の `CloseHandle` は進行中の ReadFile/WriteFile を中断
+  しない**。pipe kernel object は pending I/O 完了まで生存するため、
+  孫プロセスが pipe write end を保持する場合、fd close では reader
+  domain を unblock できない（実測: EOF が来るまで ~10s 待つ）。
+  → Windows では grace 後も未完了の domain を lingering（未 join）
+  として `run` は有界時間で返す。子孫保持は稀な edge case で、
+  lingering domain は pipe 最終 close で自然終了する。
+- **POSIX lingering channel の残留 hazard**: force close した fd を
+  持つ channel が GC されると finalizer が recycled fd を close
+  し得る → flag 未完了の channel を `leaked_channels` で意図的に
+  reachable 保持（leak は edge case に限定）。
+
+### 残った制限（v1 既知）
+
+- Windows で lingering 化した reader/writer domain は join されず残る
+  （子孫が pipe を開放するまで blocked）。`exec_io_lingering` trace
+  event で観測可能。
+- 直接の子のみ kill。子孫プロセスは対象外（設計どおり）。
+- partial は stdout/stderr 別 buffer に cap 内で保持。
+
+### 最小完了条件の確認状況
+
+- opencode provider が `Webui_exec.run` 経由で実データ取得成功
+  （`test_opencode.exe`、argv 直渡しで SQL のシェルエスケープ不要化）
+- Usage Monitor 全テスト pass、AIM_AUTOCLOSE_MS 実機起動・終了正常
+- stdin 詰まり timeout / stderr flood / 孫 pipe 保持 / cancel の
+  有 bounded 後始末を `test/exec` 24 checks で検証（Windows 実機）
