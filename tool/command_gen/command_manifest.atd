@@ -1,0 +1,44 @@
+(* Command manifest — Command SSOT生成器の入力 (Phase 1 PoC)
+
+   アプリ側が commands.json として記述し、ocaml-webui.command-gen が
+   OCaml登録コードとTS descriptorを生成する。
+   将来のOCaml宣言起点（Phase 2）ではこの中間表現を維持したまま
+   入力形式だけ差し替える。 *)
+
+type command = {
+  (* wire上のCommand名 ("usage.refresh") — OCaml識別子・TS export名へ機械変換 *)
+  name: string;
+
+  (* "atd" (default) — input/output/error がATD生成型。
+     "raw_json" — input unit / output Yojson.Safe.t / error string の
+     passthrough codec（trace.recent等、ATD型を持たないdebug Command向け） *)
+  ?kind <json name="kind">: string option;
+
+  (* kind=atd: ATD codecを含むOCamlモジュール ("Usage_schema.Usage_refresh") *)
+  ?schema_module <json name="schemaModule">: string option;
+
+  (* kind=atd: ATD型名。codec関数名は atdml規則 (<type>_of_yojson /
+     yojson_of_<type>) から機械導出する *)
+  ?input_type <json name="input">: string option;
+  ?output_type <json name="output">: string option;
+  ?error_type <json name="error">: string option;
+
+  (* "sync" (default) = define, "async" = define_async (worker domain + token) *)
+  ?mode <json name="mode">: string option;
+
+  (* asyncのみ: watchdog timeout ms *)
+  ?timeout_ms <json name="timeoutMs">: int option;
+
+  (* kind=atd: TS codecモジュールのimportパス ("./usage_refresh.js") *)
+  ?ts_module <json name="tsModule">: string option;
+
+  (* kind=raw_json: TS出力型名 (descriptorのジェネリクス引数) *)
+  ?ts_output_type <json name="tsOutputType">: string option;
+
+  (* kind=raw_json: 生成TSへそのまま出力する型宣言 (raw text) *)
+  ?ts_type_decls <json name="tsTypeDecls">: string option;
+}
+
+type manifest = {
+  commands: command list;
+}

@@ -1,0 +1,10 @@
+(rule
+ (targets command_manifest.ml command_manifest.mli)
+ (deps command_manifest.atd)
+ (action (run atdml command_manifest.atd)))
+
+(executable
+ (name command_gen)
+ (public_name ocaml-webui.command-gen)
+ (modules command_gen command_manifest)
+ (libraries yojson))
