@@ -1,11 +1,11 @@
 # examples/typed-hello
 
-manifest駆動Commandパイプラインの参照実装 — ocaml-webui上にアプリを
+宣言駆動Commandパイプラインの参照実装 — ocaml-webui上にアプリを
 作るときの想定経路。
 
 ```
-schema/hello.atd ──atdml/atdts──> OCaml + TypeScript codec
-bin/commands.json ──command-gen──> commands_gen.ml + commands_gen.ts
+bin/commands.ml ──command-gen --decl──> hello.atd ──atdml/atdts──> OCaml + TS codec
+                                  └──> commands_gen.ml + commands_gen.ts
                 └──--emit-client──> client.ts（canonical protocol v1 client）
 web/main.ts + 生成ファイル ──esbuild──> main.bundle.js ──embed──> main.exe
 ```
@@ -16,8 +16,9 @@ web/main.ts + 生成ファイル ──esbuild──> main.bundle.js ──embed
 | `work.count`   | worker domain上のasync Command。`cancellation_token` checkpoint、JS cancel、30s watchdog |
 | `trace.recent` | 統一trace ring bufferを読む `raw_json` Command                     |
 
-人が書くのは `.atd` スキーマ・`commands.json`・handler本体・TSのUI —
-残りは全て生成物。
+人が書くのは `commands.ml`（payload型 + Command宣言）・handler本体・
+TSのUI — 残りは全て生成物。`commands.ml` は `command-gen` がparseする
+だけで、アプリにはcompileされない。
 
 ## 実行
 
@@ -31,9 +32,9 @@ window closeできる。
 
 ## ファイル
 
-- `schema/hello.atd` — payload型（codecのSSOT）。
-- `bin/commands.json` — Command manifest（配線のSSOT）。
+- `bin/commands.ml` — payload型 + Command宣言（SSOT）。
 - `bin/main.ml` — window + 実装対象の `handlers` record。
 - `bin/dune` — codegen + bundle + embed rule（アプリ側の雛形）。
+- `schema/dune` — 生成された `hello.atd` をコピーし atdml/atdts を実行。
 - `web/main.ts` — emit client + 生成descriptorをimport。
 - `web/esbuild-wrapper.mjs` — esbuild JS-API wrapper（cross-platform）。

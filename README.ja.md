@@ -6,13 +6,13 @@ Worker をまたぐ単一トレース。
 
 > **現状: documented prototype (v0.1)** — APIは未凍結で、まだ汎用
 > フレームワークではありません。下記の型付きCommand生成経路が想定する
-> 使い方であり、それ以外は参考資料・内部実装です。Phase 2（OCaml宣言
-> 起点のSSOT）は将来作業です。
+> 使い方であり、それ以外は参考資料・内部実装です。
 
 ## これは何か
 
-Commandを一度だけ定義します — 現状は `.atd` スキーマ + 小さなJSON
-manifest — `ocaml-webui.command-gen` がbridgeの両側を生成します：
+Commandを一度だけ定義します — 制限OCaml構文の宣言ファイル
+（`commands.ml`。JSON manifest入力も利用可）— `ocaml-webui.command-gen`
+がbridgeの両側を生成します：
 
 - OCaml: `handlers` record（handler欠落は**コンパイルエラー**）、codec、
   登録リスト。
@@ -47,7 +47,7 @@ opam exec -- dune exec examples/typed-hello/bin/main.exe
 素形を見るためのもので、実アプリのコピー元にはしません。
 
 ライブラリとして使う手順: [docs/getting-started.ja.md](docs/getting-started.ja.md)
-manifest形式: [docs/commands-manifest.ja.md](docs/commands-manifest.ja.md)
+入力形式: [docs/commands-manifest.ja.md](docs/commands-manifest.ja.md)（JSON manifest）/ [docs/getting-started.ja.md](docs/getting-started.ja.md)（`commands.ml` 宣言 — `examples/typed-hello` が使用）
 English docs: [README.md](README.md) /
 [docs/getting-started.md](docs/getting-started.md) /
 [docs/commands-manifest.md](docs/commands-manifest.md)

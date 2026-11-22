@@ -9,13 +9,13 @@ JavaScript → OCaml → workers.
 > **Status: documented prototype (v0.1).** APIs are not frozen, and this is
 > not yet a general-purpose framework. The typed-command generation path
 > below is the intended way to use it; everything else is reference material
-> or internals. Phase 2 (OCaml-declaration-driven SSOT) is future work.
+> or internals.
 
 ## What it is
 
-You define Commands once — today as a `.atd` schema plus a small JSON
-manifest — and `ocaml-webui.command-gen` generates both sides of the
-bridge:
+You define Commands once — as a restricted-OCaml-syntax declaration
+file (`commands.ml`; a JSON manifest input is also supported) — and
+`ocaml-webui.command-gen` generates both sides of the bridge:
 
 - OCaml: a `handlers` record (missing a handler is a **compile error**),
   codecs, and the registration list.
@@ -49,7 +49,7 @@ opam exec -- dune exec examples/typed-hello/bin/main.exe
 to see the wire shape; don't copy it for real apps.
 
 To consume as a library, see [docs/getting-started.md](docs/getting-started.md).
-Manifest format: [docs/commands-manifest.md](docs/commands-manifest.md).
+Input formats: [docs/commands-manifest.md](docs/commands-manifest.md) (JSON manifest) and [docs/getting-started.md](docs/getting-started.md) (`commands.ml` declarations, used by `examples/typed-hello`).
 
 ## Platform support
 

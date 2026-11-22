@@ -10,12 +10,12 @@
  (action
   (run ocaml-webui.command-gen --emit-client client.ts)))
 
-;; Command manifest から OCaml 登録コードと TS descriptor を生成
+;; commands.ml 宣言から .atd schema・OCaml 登録コード・TS descriptor を生成
 (rule
- (targets commands_gen.ml commands_gen.ts)
- (deps commands.json)
+ (targets hello.atd commands_gen.ml commands_gen.ts)
+ (deps commands.ml)
  (action
-  (run ocaml-webui.command-gen --manifest commands.json
+  (run ocaml-webui.command-gen --decl commands.ml --atd hello.atd
    --ocaml commands_gen.ml --ts commands_gen.ts)))
 
 ;; web ソースを build dir へ

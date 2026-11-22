@@ -1,3 +1,10 @@
+;; bin/commands.ml から生成された hello.atd をこの build dir へコピー
+;; (atdml/atdts は入力ファイルの隣に出力するため、先にコピーが必要)
+(rule
+ (targets hello.atd)
+ (deps ../bin/hello.atd)
+ (action (copy ../bin/hello.atd hello.atd)))
+
 ;; hello.atd から OCaml codec を生成
 (rule
  (targets hello.ml hello.mli)

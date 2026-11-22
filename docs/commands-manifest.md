@@ -11,6 +11,13 @@ ocaml-webui.command-gen --emit-client <out.ts>
 
 Schema: `tool/command_gen/command_manifest.atd`.
 
+> Alternative input: `--decl <commands.ml> --atd <out.atd>` parses a
+> restricted-OCaml-syntax declaration file (payload types + `command`
+> applications), emits the `.atd` schema, and feeds the same manifest IR —
+> so `--ocaml`/`--ts` outputs are identical to an equivalent manifest.
+> `examples/typed-hello` uses this path. See
+> [getting-started.md](getting-started.md) for the declaration syntax.
+
 ## Top level
 
 ```json

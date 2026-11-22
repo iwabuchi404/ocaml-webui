@@ -11,6 +11,12 @@ ocaml-webui.command-gen --emit-client <out.ts>
 
 スキーマ: `tool/command_gen/command_manifest.atd`
 
+> 代替入力: `--decl <commands.ml> --atd <out.atd>` で制限OCaml構文の
+> 宣言ファイル（payload型 + `command` 適用式）をparseし、`.atd`
+> スキーマをemitしつつ同じmanifest IRへ送る — `--ocaml`/`--ts` 出力は
+> 等価なmanifestと同一になる。`examples/typed-hello` がこの経路。
+> 宣言構文は [getting-started.ja.md](getting-started.ja.md) 参照。
+
 ## トップレベル
 
 ```json
