@@ -1,0 +1,51 @@
+;; hello.atd から生成された TypeScript codec を build dir へ
+(rule
+ (targets hello.ts)
+ (deps ../schema/hello.ts)
+ (action (copy ../schema/hello.ts hello.ts)))
+
+;; runtime canonical client を emit (--emit-client)
+(rule
+ (targets client.ts)
+ (action
+  (run ocaml-webui.command-gen --emit-client client.ts)))
+
+;; Command manifest から OCaml 登録コードと TS descriptor を生成
+(rule
+ (targets commands_gen.ml commands_gen.ts)
+ (deps commands.json)
+ (action
+  (run ocaml-webui.command-gen --manifest commands.json
+   --ocaml commands_gen.ml --ts commands_gen.ts)))
+
+;; web ソースを build dir へ
+(rule
+ (targets main.ts)
+ (deps ../web/main.ts)
+ (action (copy ../web/main.ts main.ts)))
+
+;; IIFE bundle — npm ci in ../web が前提
+(rule
+ (targets main.bundle.js)
+ (deps hello.ts client.ts commands_gen.ts main.ts
+   ../web/esbuild-wrapper.mjs
+   ../web/package.json
+   ../web/package-lock.json
+   (source_tree ../web/node_modules))
+ (action
+  (run node ../web/esbuild-wrapper.mjs main.ts main.bundle.js iife browser)))
+
+;; bundle を OCaml 文字列として埋め込み
+(rule
+ (targets bundle_embed.ml)
+ (deps main.bundle.js gen_bundle_embed.ml)
+ (action
+  (run ocaml gen_bundle_embed.ml bundle_embed.ml main.bundle.js bundle)))
+
+(executable
+ (name main)
+ (modules main commands_gen bundle_embed)
+ (libraries unix threads yojson
+   hello_schema
+   ocaml-webui.raw ocaml-webui.bridge-atd ocaml-webui.async
+   ocaml-webui.trace))

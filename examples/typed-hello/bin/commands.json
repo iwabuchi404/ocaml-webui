@@ -1,0 +1,30 @@
+{
+  "commands": [
+    {
+      "name": "hello.ping",
+      "schemaModule": "Hello_schema.Hello",
+      "input": "hello_ping_request",
+      "output": "hello_ping_response",
+      "error": "hello_ping_error",
+      "mode": "sync",
+      "tsModule": "./hello.js"
+    },
+    {
+      "name": "work.count",
+      "schemaModule": "Hello_schema.Hello",
+      "input": "work_count_request",
+      "output": "work_count_result",
+      "error": "work_count_error",
+      "mode": "async",
+      "timeoutMs": 30000,
+      "tsModule": "./hello.js"
+    },
+    {
+      "name": "trace.recent",
+      "kind": "raw_json",
+      "mode": "sync",
+      "tsOutputType": "TraceRecentResult",
+      "tsTypeDecls": "export interface TraceEvent {\n  name: string;\n  ts: number;\n  trace_id: string;\n  request_id: string;\n  command: string;\n  data: Record<string, unknown>;\n}\n\nexport interface TraceRecentResult {\n  events: TraceEvent[];\n}"
+    }
+  ]
+}

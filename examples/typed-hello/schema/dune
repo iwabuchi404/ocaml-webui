@@ -1,0 +1,16 @@
+;; hello.atd から OCaml codec を生成
+(rule
+ (targets hello.ml hello.mli)
+ (deps hello.atd)
+ (action (run atdml hello.atd)))
+
+;; hello.atd から TypeScript codec を生成
+(rule
+ (target hello.ts)
+ (deps hello.atd)
+ (action (run atdts %{deps})))
+
+(library
+ (name hello_schema)
+ (libraries yojson)
+ (modules hello))

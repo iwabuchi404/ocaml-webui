@@ -3,8 +3,16 @@
  (deps command_manifest.atd)
  (action (run atdml command_manifest.atd)))
 
+;; js/webui_client.ts を実行ファイルに埋め込み (--emit-client で展開)
+(rule
+ (targets client_embed.ml)
+ (deps ../../js/webui_client.ts gen_embed.ml)
+ (action
+  (with-stdout-to client_embed.ml
+   (run ocaml gen_embed.ml ../../js/webui_client.ts client_ts))))
+
 (executable
  (name command_gen)
  (public_name ocaml-webui.command-gen)
- (modules command_gen command_manifest)
+ (modules command_gen command_manifest client_embed)
  (libraries yojson))

@@ -1,0 +1,18 @@
+;; command-gen fixture test — manifestから生成した出力をgolden fileとdiffする。
+;; expectedファイルは生成器を信頼して初回作成、以後はdiffで退行検出する。
+
+(rule
+ (targets commands_gen.ml commands_gen.ts)
+ (deps commands.json %{exe:../../tool/command_gen/command_gen.exe})
+ (action
+  (run %{exe:../../tool/command_gen/command_gen.exe}
+   --manifest commands.json
+   --ocaml commands_gen.ml --ts commands_gen.ts)))
+
+(rule
+ (alias runtest)
+ (action (diff expected_commands_gen.ml commands_gen.ml)))
+
+(rule
+ (alias runtest)
+ (action (diff expected_commands_gen.ts commands_gen.ts)))

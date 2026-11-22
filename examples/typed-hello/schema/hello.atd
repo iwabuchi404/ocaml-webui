@@ -1,0 +1,49 @@
+(* examples/typed-hello — Command schema (SSOT)
+   hello.ping (sync) と work.count (async + cancel) の型を定義する。
+   atdml → OCaml codec、atdts → TypeScript codec に生成される。 *)
+
+(* hello.ping — sync Command。validation error の型付き返却を示す。 *)
+
+type hello_ping_request = {
+  message: string;
+}
+
+type hello_ping_response = {
+  echoed: string;
+  length: int;
+  observed_trace_id <json name="observedTraceId">: string;
+}
+
+type hello_ping_error_code = [
+  | Empty_message <json name="empty_message">
+  | Too_long <json name="too_long">
+]
+
+type hello_ping_error = {
+  code: hello_ping_error_code;
+  message: string;
+  retryable: bool;
+  category: string;
+}
+
+(* work.count — async Command。handler は cancellation_token を
+   checkpoint で poll し、JS cancel / timeout / window close に
+   協調的に応答する。 *)
+
+type work_count_request = {
+  target: int;
+  delay_ms <json name="delayMs">: int;
+}
+
+type work_count_result = {
+  counted: int;
+  elapsed_ms <json name="elapsedMs">: int;
+  cancelled: bool;
+}
+
+type work_count_error = {
+  code: string;
+  message: string;
+  retryable: bool;
+  category: string;
+}

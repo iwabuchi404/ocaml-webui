@@ -1,0 +1,8 @@
+;; examples/minimal — npm不要・コード生成無しの最小構成。
+;; bridge_atd の passthrough codec だけを使い、JS側は
+;; __ocaml_webui_invoke の protocol v1 envelope を直に組み立てる。
+;; 実アプリでは examples/typed-hello の manifest + 生成 client を使うこと。
+(executable
+ (name main)
+ (modules main)
+ (libraries unix threads yojson ocaml-webui.raw ocaml-webui.bridge-atd))

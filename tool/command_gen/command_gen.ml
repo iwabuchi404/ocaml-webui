@@ -242,10 +242,16 @@ let emit_ts path (cmds : cmd list) =
 
 (* ─── main ─── *)
 
+let emit_client path =
+  let oc = open_out_bin path in
+  output_string oc Client_embed.client_ts;
+  close_out oc
+
 let () =
   let manifest_path = ref "" in
   let ocaml_path = ref "" in
   let ts_path = ref "" in
+  let client_path = ref "" in
   let args = Array.length Sys.argv in
   let i = ref 1 in
   while !i < args do
@@ -258,12 +264,20 @@ let () =
      | "--manifest" -> need_value "--manifest" manifest_path
      | "--ocaml" -> need_value "--ocaml" ocaml_path
      | "--ts" -> need_value "--ts" ts_path
+     | "--emit-client" -> need_value "--emit-client" client_path
      | flag -> fail "unknown flag %s" flag)
   done;
-  if !manifest_path = "" || !ocaml_path = "" || !ts_path = "" then
-    fail "usage: ocaml-webui.command-gen --manifest <json> --ocaml <out.ml> --ts <out.ts>";
-  let json = Yojson.Safe.from_file !manifest_path in
-  let manifest = M.manifest_of_yojson json in
-  let cmds = List.map normalize manifest.M.commands in
-  emit_ocaml !ocaml_path cmds;
-  emit_ts !ts_path cmds
+  if !client_path <> "" then emit_client !client_path;
+  if !manifest_path <> "" then begin
+    if !ocaml_path = "" || !ts_path = "" then
+      fail "--manifest requires --ocaml <out.ml> and --ts <out.ts>";
+    let json = Yojson.Safe.from_file !manifest_path in
+    let manifest = M.manifest_of_yojson json in
+    let cmds = List.map normalize manifest.M.commands in
+    emit_ocaml !ocaml_path cmds;
+    emit_ts !ts_path cmds
+  end else if !client_path = "" then
+    fail
+      "usage: ocaml-webui.command-gen --manifest <json> --ocaml <out.ml> --ts \
+       <out.ts> [--emit-client <out.ts>]\n\
+      \       ocaml-webui.command-gen --emit-client <out.ts>"

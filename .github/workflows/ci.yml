@@ -42,6 +42,11 @@ jobs:
         working-directory: web/phase3-atd-command
         run: npm ci
 
+      # examples/typed-hello bundling keeps examples building under @all
+      - name: Install example frontend dependencies
+        working-directory: examples/typed-hello/web
+        run: npm ci
+
       - name: Build
         shell: bash
         run: opam exec -- dune build @all
@@ -95,6 +100,10 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: web/phase3-atd-command
+        run: npm ci
+
+      - name: Install example frontend dependencies
+        working-directory: examples/typed-hello/web
         run: npm ci
 
       - name: Build

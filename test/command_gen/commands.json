@@ -1,0 +1,30 @@
+{
+  "commands": [
+    {
+      "name": "echo.ping",
+      "schemaModule": "Test_schema.Echo",
+      "input": "echo_request",
+      "output": "echo_response",
+      "error": "echo_error",
+      "mode": "sync",
+      "tsModule": "./echo.js"
+    },
+    {
+      "name": "work.slow",
+      "schemaModule": "Test_schema.Work",
+      "input": "work_request",
+      "output": "work_result",
+      "error": "work_error",
+      "mode": "async",
+      "timeoutMs": 5000,
+      "tsModule": "./work.js"
+    },
+    {
+      "name": "trace.recent",
+      "kind": "raw_json",
+      "mode": "sync",
+      "tsOutputType": "TraceRecentResult",
+      "tsTypeDecls": "export interface TraceRecentResult { events: unknown[] }"
+    }
+  ]
+}
