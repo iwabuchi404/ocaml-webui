@@ -1,5 +1,7 @@
 # ocaml-webui
 
+[日本語版 README](README.ja.md)
+
 An OCaml application runtime for desktop WebView UIs — typed commands,
 structured errors, cooperative cancellation, and a single trace spanning
 JavaScript → OCaml → workers.
