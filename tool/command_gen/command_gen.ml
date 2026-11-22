@@ -249,6 +249,8 @@ let emit_client path =
 
 let () =
   let manifest_path = ref "" in
+  let decl_path = ref "" in
+  let atd_path = ref "" in
   let ocaml_path = ref "" in
   let ts_path = ref "" in
   let client_path = ref "" in
@@ -262,22 +264,47 @@ let () =
     in
     (match Sys.argv.(!i) with
      | "--manifest" -> need_value "--manifest" manifest_path
+     | "--decl" -> need_value "--decl" decl_path
+     | "--atd" -> need_value "--atd" atd_path
      | "--ocaml" -> need_value "--ocaml" ocaml_path
      | "--ts" -> need_value "--ts" ts_path
      | "--emit-client" -> need_value "--emit-client" client_path
      | flag -> fail "unknown flag %s" flag)
   done;
   if !client_path <> "" then emit_client !client_path;
-  if !manifest_path <> "" then begin
+  let emit_from commands =
     if !ocaml_path = "" || !ts_path = "" then
-      fail "--manifest requires --ocaml <out.ml> and --ts <out.ts>";
-    let json = Yojson.Safe.from_file !manifest_path in
-    let manifest = M.manifest_of_yojson json in
-    let cmds = List.map normalize manifest.M.commands in
+      fail "--manifest/--decl requires --ocaml <out.ml> and --ts <out.ts>";
+    let cmds = List.map normalize commands in
     emit_ocaml !ocaml_path cmds;
     emit_ts !ts_path cmds
-  end else if !client_path = "" then
-    fail
-      "usage: ocaml-webui.command-gen --manifest <json> --ocaml <out.ml> --ts \
-       <out.ts> [--emit-client <out.ts>]\n\
-      \       ocaml-webui.command-gen --emit-client <out.ts>"
+  in
+  (if !manifest_path <> "" && !decl_path <> "" then
+     fail "--manifest and --decl are mutually exclusive"
+   else if !manifest_path <> "" then begin
+     let json = Yojson.Safe.from_file !manifest_path in
+     let manifest = M.manifest_of_yojson json in
+     emit_from manifest.M.commands
+   end else if !decl_path <> "" then begin
+     if !atd_path = "" then fail "--decl requires --atd <out.atd>";
+     let decl =
+       try Decl_parse.parse ~atd_output:!atd_path !decl_path
+       with Decl_parse.Error (pos, msg) ->
+         Decl_parse.report_error stderr pos msg;
+         exit 2
+     in
+     if decl.atd_text <> "" then begin
+       let oc = open_out_bin !atd_path in
+       output_string oc
+         "(* GENERATED FILE — do not edit. Source: commands.ml *)\n\n";
+       output_string oc decl.atd_text;
+       close_out oc
+     end;
+     emit_from decl.commands
+   end else if !client_path = "" then
+     fail
+       "usage: ocaml-webui.command-gen --manifest <json> --ocaml <out.ml> --ts \
+        <out.ts> [--emit-client <out.ts>]\n\
+       \       ocaml-webui.command-gen --decl <commands.ml> --atd <out.atd> \
+        --ocaml <out.ml> --ts <out.ts>\n\
+       \       ocaml-webui.command-gen --emit-client <out.ts>")

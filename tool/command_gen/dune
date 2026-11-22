@@ -14,5 +14,5 @@
 (executable
  (name command_gen)
  (public_name ocaml-webui.command-gen)
- (modules command_gen command_manifest client_embed)
- (libraries yojson))
+ (modules command_gen command_manifest client_embed decl_parse)
+ (libraries yojson compiler-libs.common))

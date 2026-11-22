@@ -16,3 +16,26 @@
 (rule
  (alias runtest)
  (action (diff expected_commands_gen.ts commands_gen.ts)))
+
+;; Phase 2 α PoC — commands_decl.ml（制限OCaml構文SSOT）からも
+;; 同一の commands_gen.ml/.ts が生成されることを検証する。
+;; さらに gen.atd（type宣言→.atd）をgolden diffする。
+(rule
+ (targets decl_commands_gen.ml decl_commands_gen.ts gen.atd)
+ (deps commands_decl.ml %{exe:../../tool/command_gen/command_gen.exe})
+ (action
+  (run %{exe:../../tool/command_gen/command_gen.exe}
+   --decl commands_decl.ml --atd gen.atd
+   --ocaml decl_commands_gen.ml --ts decl_commands_gen.ts)))
+
+(rule
+ (alias runtest)
+ (action (diff expected_commands_gen.ml decl_commands_gen.ml)))
+
+(rule
+ (alias runtest)
+ (action (diff expected_commands_gen.ts decl_commands_gen.ts)))
+
+(rule
+ (alias runtest)
+ (action (diff expected_gen.atd gen.atd)))
