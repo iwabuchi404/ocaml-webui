@@ -1,4 +1,4 @@
-(* examples/typed-hello — manifest駆動Command生成の参照実装。
+(* examples/typed-hello — commands.ml宣言駆動Command生成の参照実装。
 
    - hello.ping : sync Command、ATD型 + 型付き validation error
    - work.count : async Command、cancellation_token checkpoint poll +
@@ -6,7 +6,7 @@
    - trace.recent : raw_json Command、unified trace ring buffer の
                     内容を返す debug用 Command
 
-   Commandのwire名・codec・登録listは bin/commands.json (SSOT) から
+   Commandのwire名・codec・登録listは bin/commands.ml (SSOT) から
    ocaml-webui.command-gen が生成する commands_gen.ml が全て担う。
    人が書くのは handlers record への handler 実装だけ。 *)
 

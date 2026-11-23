@@ -97,6 +97,6 @@ OCaml package and the emitted client together keeps the two in sync.
 - Field names in TS types stay snake_case (atdts convention); wire names
   come from `<json name>` annotations in the `.atd`.
 - No duplicate detection across `name`s — keep wire names unique.
-- Phase 2 (OCaml-declaration SSOT) is future work; the manifest is the
-  documented v0.1 path and the intermediate form the next input format
-  will generate into.
+- The OCaml declaration input (`--decl commands.ml`) is the
+  recommended path for new apps; the manifest remains as the underlying
+  intermediate form that path generates into.

@@ -4,10 +4,10 @@
 `.atd`スキーマ + codec + OCaml登録コード + 生成TypeScript client。
 `examples/typed-hello` と同じ構成なので、並べて読んでください。
 
-> Prototype status: `--decl` 宣言経路は Phase 2 proof-of-concept です。
-> JSON manifest（`--manifest commands.json`、
-> [commands-manifest.ja.md](commands-manifest.ja.md) 参照）は中間表現の
-> 入力として引き続きサポートされます。どちらもAPI freeze前に変更の
+> Prototype status: `commands.ml` 宣言が新規アプリの推奨入力です
+> （Phase 2 proof-of-concept として実装）。JSON manifest
+> （`--manifest commands.json`、[commands-manifest.ja.md](commands-manifest.ja.md)
+> 参照）は中間表現として残っています。どちらもAPI freeze前に変更の
 > 可能性があります。
 
 ## 1. インストール
@@ -181,6 +181,8 @@ envelopeを送ります。`traceId`/`requestId` はOCaml側の統一traceへ
 - `commands.ml` はparseのみ — OCaml compilerによるtypecheckはなく、
   `command` 形式のeditor/Merlin対応もない（Phase 2継続候補）。
 - JS→OCaml event pushは未実装 — Commandのみ。
+- 統一traceが記録するのはOCaml側のイベントのみ。`traceId`/`requestId`
+  はJS側で生成されて受け渡されるが、JS側の出来事そのものは記録されない。
 - Linux backend: 同時にliveにできるWindowは1つ、初期thread上で作成。
 - `commands_gen.ts` は `./client.js` をimport — emit clientは同一
   出力dirで `client.ts` の名前にすること。

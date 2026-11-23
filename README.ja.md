@@ -11,7 +11,7 @@ Worker をまたぐ単一トレース。
 ## これは何か
 
 Commandを一度だけ定義します — 制限OCaml構文の宣言ファイル
-（`commands.ml`。JSON manifest入力も利用可）— `ocaml-webui.command-gen`
+（`commands.ml`。新規アプリはこれが推奨入力）— `ocaml-webui.command-gen`
 がbridgeの両側を生成します：
 
 - OCaml: `handlers` record（handler欠落は**コンパイルエラー**）、codec、
@@ -28,11 +28,18 @@ domain、外部プロセスまで追従します — 層ごとのログではな
 ## クイックスタート
 
 ```bash
+git clone --recurse-submodules https://github.com/iwabuchi404/ocaml-webui.git
+cd ocaml-webui
 opam switch create . 5.4.1
 opam install . --deps-only   # または下記のpin手順
 cd examples/typed-hello/web && npm ci && cd ../..
 opam exec -- dune exec examples/typed-hello/bin/main.exe
 ```
+
+`--recurse-submodules` は必須 — `vendor/webview` はsubmoduleであり、
+無しではビルドに失敗します。Windowsでは先に
+[プラットフォーム](#プラットフォーム) の前提環境を確認してください
+（WebView2 runtime、MinGW-w64 C++ toolchain）。
 
 `examples/typed-hello` は想定する経路全体を実演します：
 
@@ -47,7 +54,10 @@ opam exec -- dune exec examples/typed-hello/bin/main.exe
 素形を見るためのもので、実アプリのコピー元にはしません。
 
 ライブラリとして使う手順: [docs/getting-started.ja.md](docs/getting-started.ja.md)
-入力形式: [docs/commands-manifest.ja.md](docs/commands-manifest.ja.md)（JSON manifest）/ [docs/getting-started.ja.md](docs/getting-started.ja.md)（`commands.ml` 宣言 — `examples/typed-hello` が使用）
+新規アプリは `commands.ml` 宣言を使ってください —
+[docs/getting-started.ja.md](docs/getting-started.ja.md)。JSON
+manifestは中間表現として残っています
+（[docs/commands-manifest.ja.md](docs/commands-manifest.ja.md)）。
 English docs: [README.md](README.md) /
 [docs/getting-started.md](docs/getting-started.md) /
 [docs/commands-manifest.md](docs/commands-manifest.md)

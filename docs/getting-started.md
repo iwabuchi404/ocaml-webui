@@ -5,10 +5,11 @@ file (`commands.ml`) → generated `.atd` schema + codecs + OCaml
 registration + generated TypeScript client. It mirrors
 `examples/typed-hello`, which you can read alongside this.
 
-> Prototype status: the `--decl` declaration path is a Phase 2
-> proof-of-concept. A JSON manifest (`--manifest commands.json`,
-> see [commands-manifest.md](commands-manifest.md)) remains supported as
-> the underlying IR input. Both may change before the API is frozen.
+> Prototype status: `commands.ml` declarations are the recommended
+> input for new apps (implemented as a Phase 2 proof-of-concept). The
+> JSON manifest (`--manifest commands.json`, see
+> [commands-manifest.md](commands-manifest.md)) remains as the
+> underlying intermediate form. Both may change before the API is frozen.
 
 ## 1. Install
 
@@ -184,6 +185,9 @@ unified trace on the OCaml side — that's the point of the runtime.
   compiler, and there is no editor/Merlin support for the `command`
   form (Phase 2 continuation).
 - No JS→OCaml event push yet — Commands only.
+- The unified trace records OCaml-side events only: `traceId`/`requestId`
+  are minted on the JS side and passed through, but JS-side events are
+  not recorded.
 - Linux backend: one live Window at a time, create on the initial thread.
 - `commands_gen.ts` imports `./client.js` — keep the emitted client named
   `client.ts` in the same output directory.

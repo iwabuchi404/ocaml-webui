@@ -95,5 +95,5 @@ cancel:   { "protocol":1, "kind":"cancel", "requestId":"..",
 - TS側のフィールド名は snake_case のまま（atdts規約）。wire名は
   `.atd` の `<json name>` 注釈由来。
 - `name` の重複検出は無い — wire名はユニークに保つこと。
-- Phase 2（OCaml宣言SSOT）は将来作業。manifestは v0.1 の文書化済み
-  経路であり、次の入力形式が生成する中間表現としても維持する設計。
+- OCaml宣言入力（`--decl commands.ml`）が新規アプリの推奨経路。
+  manifestはその経路が生成する中間表現として維持される設計。

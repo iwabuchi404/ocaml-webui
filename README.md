@@ -13,8 +13,8 @@ JavaScript → OCaml → workers.
 
 ## What it is
 
-You define Commands once — as a restricted-OCaml-syntax declaration
-file (`commands.ml`; a JSON manifest input is also supported) — and
+You define Commands once — in a restricted-OCaml-syntax declaration
+file (`commands.ml`), which is the recommended input for new apps — and
 `ocaml-webui.command-gen` generates both sides of the bridge:
 
 - OCaml: a `handlers` record (missing a handler is a **compile error**),
@@ -30,11 +30,18 @@ per-layer logs.
 ## Quickstart
 
 ```bash
+git clone --recurse-submodules https://github.com/iwabuchi404/ocaml-webui.git
+cd ocaml-webui
 opam switch create . 5.4.1
 opam install . --deps-only   # or pin per below
 cd examples/typed-hello/web && npm ci && cd ../..
 opam exec -- dune exec examples/typed-hello/bin/main.exe
 ```
+
+`--recurse-submodules` is required — `vendor/webview` is a submodule and
+the build fails without it. On Windows, check the prerequisites in
+[Platform support](#platform-support) first (WebView2 runtime, MinGW-w64
+C++ toolchain).
 
 `examples/typed-hello` demonstrates the full intended path:
 
@@ -49,7 +56,10 @@ opam exec -- dune exec examples/typed-hello/bin/main.exe
 to see the wire shape; don't copy it for real apps.
 
 To consume as a library, see [docs/getting-started.md](docs/getting-started.md).
-Input formats: [docs/commands-manifest.md](docs/commands-manifest.md) (JSON manifest) and [docs/getting-started.md](docs/getting-started.md) (`commands.ml` declarations, used by `examples/typed-hello`).
+New apps should use `commands.ml` declarations — see
+[docs/getting-started.md](docs/getting-started.md). The JSON manifest
+remains as the underlying intermediate form
+([docs/commands-manifest.md](docs/commands-manifest.md)).
 
 ## Platform support
 

@@ -1,9 +1,9 @@
 /**
- * examples/typed-hello — manifest駆動Command + 生成client の最小UI。
+ * examples/typed-hello — commands.ml宣言駆動Command + 生成client の最小UI。
  *
  * 生成物:
- *   ./hello.js        — atdts生成 codec (schema/hello.atd)
- *   ./commands_gen.js — command-gen生成 descriptor (bin/commands.json)
+ *   ./hello.js        — atdts生成 codec (bin/commands.ml → hello.atd)
+ *   ./commands_gen.js — command-gen生成 descriptor (bin/commands.ml)
  *   ./client.js       — command-gen --emit-client 生成 runtime client
  */
 import {
