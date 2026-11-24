@@ -58,6 +58,8 @@ opam exec -- dune exec examples/typed-hello/bin/main.exe
 [docs/getting-started.ja.md](docs/getting-started.ja.md)。JSON
 manifestは中間表現として残っています
 （[docs/commands-manifest.ja.md](docs/commands-manifest.ja.md)）。
+その他のdocsは [docs/README.ja.md](docs/README.ja.md)（現行
+リファレンス vs 計画・履歴資料の索引）参照。
 English docs: [README.md](README.md) /
 [docs/getting-started.md](docs/getting-started.md) /
 [docs/commands-manifest.md](docs/commands-manifest.md)

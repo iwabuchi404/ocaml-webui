@@ -11,6 +11,19 @@ ocaml-webui.command-gen --emit-client <out.ts>
 
 スキーマ: `tool/command_gen/command_manifest.atd`
 
+## `--decl` との関係
+
+両入力は長期的に併存する:
+
+- `--decl commands.ml` — 人が書くための宣言経路。新規アプリの推奨。
+  `.atd` スキーマをemitしつつ下記と同じmanifest IRへ送る。
+- `--manifest commands.json` — 中間表現。ツール・テスト・manifestを
+  機械生成する用途向けに維持。
+
+等価な入力からは byte-identical な `commands_gen.ml`/`commands_gen.ts`
+が生成される（fixtureで検証済み）。`--manifest` のdeprecation計画は
+ない — 旧形式ではなく、別レイヤーの入力である。
+
 > 代替入力: `--decl <commands.ml> --atd <out.atd>` で制限OCaml構文の
 > 宣言ファイル（payload型 + `command` 適用式）をparseし、`.atd`
 > スキーマをemitしつつ同じmanifest IRへ送る — `--ocaml`/`--ts` 出力は

@@ -1,5 +1,10 @@
 # Webui_raw 実装状況
 
+> **注意: この記録は 2026-07-20 時点のもの。** async/trace/worker/
+> resource/exec 各層と command-gen 導入前のスナップショット。
+> 現行の利用ガイドは [getting-started.ja.md](getting-started.ja.md)、
+> 索引は [README.ja.md](README.ja.md) を参照。
+
 更新日: 2026-07-20
 
 ## 現在地

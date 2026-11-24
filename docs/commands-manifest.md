@@ -11,6 +11,19 @@ ocaml-webui.command-gen --emit-client <out.ts>
 
 Schema: `tool/command_gen/command_manifest.atd`.
 
+## Relationship to `--decl`
+
+Both inputs are supported long-term:
+
+- `--decl commands.ml` — the human-facing declaration path. Recommended
+  for new apps. Emits the `.atd` schema plus the same manifest IR below.
+- `--manifest commands.json` — the underlying IR. Kept for tooling,
+  tests, and anyone generating manifests programmatically.
+
+For equivalent inputs the generated `commands_gen.ml`/`commands_gen.ts`
+are byte-identical (fixture-tested). There is no deprecation plan for
+`--manifest` — it is a different layer, not a legacy alias.
+
 > Alternative input: `--decl <commands.ml> --atd <out.atd>` parses a
 > restricted-OCaml-syntax declaration file (payload types + `command`
 > applications), emits the `.atd` schema, and feeds the same manifest IR —

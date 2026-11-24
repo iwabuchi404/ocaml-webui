@@ -60,6 +60,8 @@ New apps should use `commands.ml` declarations — see
 [docs/getting-started.md](docs/getting-started.md). The JSON manifest
 remains as the underlying intermediate form
 ([docs/commands-manifest.md](docs/commands-manifest.md)).
+All other docs: [docs/README.md](docs/README.md) (index of current
+reference vs. plan/history documents).
 
 ## Platform support
 
