@@ -88,6 +88,9 @@ English docs: [README.md](README.md) /
 | `ocaml-webui.bridge-baseline` | 手書きbridge — **参考・比較用のみ**。推奨経路ではない |
 | `ocaml-webui.command-gen` | 実行ファイル: manifest → OCaml + TS コード生成 |
 
+各レイヤーの使い方（trace/async/exec/worker/resourceの組み合わせ）:
+[docs/runtime-layers.ja.md](docs/runtime-layers.ja.md)。
+
 ## リポジトリ構成
 
 ```

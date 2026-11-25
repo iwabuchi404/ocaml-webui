@@ -87,6 +87,9 @@ reference vs. plan/history documents).
 | `ocaml-webui.bridge-baseline` | Handwritten bridge — **reference/comparison only**, not the recommended path |
 | `ocaml-webui.command-gen`  | Executable: manifest → OCaml + TS codegen                       |
 
+Layer-by-layer usage (trace/async/exec/worker/resource and how they
+compose): [docs/runtime-layers.md](docs/runtime-layers.md).
+
 ## Repository layout
 
 ```

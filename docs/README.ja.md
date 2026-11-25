@@ -11,6 +11,7 @@
 | [commands-manifest.ja.md](commands-manifest.ja.md) / [en](commands-manifest.md) | JSON manifestフィールド（`--manifest`入力、共通の中間表現） |
 | [command-ssot-phase2-comparison.ja.md](command-ssot-phase2-comparison.ja.md) | 入力形式3案比較 + 実装された`commands.ml`宣言構文 |
 | [command-decl-compile-consideration.ja.md](command-decl-compile-consideration.ja.md) | ペンディング: `commands.ml`のcompile可能化（Merlin/型check）— 問題・選択肢・トレードオフ |
+| [runtime-layers.ja.md](runtime-layers.ja.md) / [en](runtime-layers.md) | trace/async/exec/worker/resourceの組み合わせ利用 |
 | [dependencies.md](dependencies.md) | 各依存の出所 |
 | [webui-raw-binding-design.ja.md](webui-raw-binding-design.ja.md) / [en](webui-raw-binding-design.md) | `Webui_raw`のlifecycle/state machine設計 |
 

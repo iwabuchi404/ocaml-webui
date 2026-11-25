@@ -11,6 +11,7 @@ records. Dates in filenames are plan-time, not implementation-time.
 | [commands-manifest.md](commands-manifest.md) / [ja](commands-manifest.ja.md) | JSON manifest fields (`--manifest` input, the shared IR) |
 | [command-ssot-phase2-comparison.ja.md](command-ssot-phase2-comparison.ja.md) | Input-format comparison + the `commands.ml` declaration syntax actually implemented |
 | [command-decl-compile-consideration.ja.md](command-decl-compile-consideration.ja.md) | Pending: making `commands.ml` compileable (Merlin/typecheck) — problem, options, trade-offs |
+| [runtime-layers.md](runtime-layers.md) / [ja](runtime-layers.ja.md) | Using trace/async/exec/worker/resource together |
 | [dependencies.md](dependencies.md) | Where each dependency comes from |
 | [webui-raw-binding-design.md](webui-raw-binding-design.md) / [ja](webui-raw-binding-design.ja.md) | `Webui_raw` lifecycle/state-machine design |
 
