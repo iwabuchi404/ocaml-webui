@@ -183,7 +183,8 @@ unified trace on the OCaml side — that's the point of the runtime.
 
 - `commands.ml` is parsed only — it is not typechecked by the OCaml
   compiler, and there is no editor/Merlin support for the `command`
-  form (Phase 2 continuation).
+  form (pending:
+  [command-decl-compile-consideration.ja.md](command-decl-compile-consideration.ja.md)).
 - No JS→OCaml event push yet — Commands only.
 - The unified trace records OCaml-side events only: `traceId`/`requestId`
   are minted on the JS side and passed through, but JS-side events are

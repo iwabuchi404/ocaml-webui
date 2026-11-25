@@ -10,6 +10,7 @@ records. Dates in filenames are plan-time, not implementation-time.
 | [getting-started.md](getting-started.md) / [ja](getting-started.ja.md) | Consuming ocaml-webui: `commands.ml` → generated bridge |
 | [commands-manifest.md](commands-manifest.md) / [ja](commands-manifest.ja.md) | JSON manifest fields (`--manifest` input, the shared IR) |
 | [command-ssot-phase2-comparison.ja.md](command-ssot-phase2-comparison.ja.md) | Input-format comparison + the `commands.ml` declaration syntax actually implemented |
+| [command-decl-compile-consideration.ja.md](command-decl-compile-consideration.ja.md) | Pending: making `commands.ml` compileable (Merlin/typecheck) — problem, options, trade-offs |
 | [dependencies.md](dependencies.md) | Where each dependency comes from |
 | [webui-raw-binding-design.md](webui-raw-binding-design.md) / [ja](webui-raw-binding-design.ja.md) | `Webui_raw` lifecycle/state-machine design |
 

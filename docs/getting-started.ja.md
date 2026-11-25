@@ -179,7 +179,8 @@ envelopeを送ります。`traceId`/`requestId` はOCaml側の統一traceへ
 ## 7. 残っている手作業 / 既知の制限
 
 - `commands.ml` はparseのみ — OCaml compilerによるtypecheckはなく、
-  `command` 形式のeditor/Merlin対応もない（Phase 2継続候補）。
+  `command` 形式のeditor/Merlin対応もない（ペンディング:
+  [command-decl-compile-consideration.ja.md](command-decl-compile-consideration.ja.md)）。
 - JS→OCaml event pushは未実装 — Commandのみ。
 - 統一traceが記録するのはOCaml側のイベントのみ。`traceId`/`requestId`
   はJS側で生成されて受け渡されるが、JS側の出来事そのものは記録されない。
